@@ -1,0 +1,10 @@
+# API terrain Swiss Piscine — dépendances
+# (toutes déjà présentes dans l'environnement Python 3.14 de Geoffrey)
+fastapi>=0.136
+uvicorn>=0.48
+PyJWT>=2.13
+pydantic-settings>=2.14
+python-multipart>=0.0.29
+python-dotenv>=1.0
+requests>=2.31
+# Le hash des PIN utilise hashlib (stdlib) — aucune lib crypto externe requise.

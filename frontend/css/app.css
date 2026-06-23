@@ -1,0 +1,116 @@
+/* App Équipe Swiss Piscine — design system (navy / aqua), mobile-first, sans build. */
+:root {
+  --navy: #0c2233;
+  --navy-2: #143247;
+  --aqua: #19b6c9;
+  --aqua-dark: #0e8fa0;
+  --ink: #0c2233;
+  --muted: #6b7c89;
+  --line: #e3e9ee;
+  --bg: #f4f7f9;
+  --white: #ffffff;
+  --ok: #2faa5e;
+  --warn: #e08a1e;
+  --danger: #d2493a;
+  --radius: 16px;
+  --tap: 52px;
+  --header-h: 56px;
+  --tabbar-h: 64px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--ink); overscroll-behavior-y: none; }
+#app { min-height: 100%; }
+
+/* --- Header --- */
+.app-header {
+  position: sticky; top: 0; z-index: 10;
+  height: calc(var(--header-h) + var(--safe-top));
+  padding-top: var(--safe-top);
+  display: flex; align-items: center; justify-content: space-between;
+  padding-left: 16px; padding-right: 16px;
+  background: var(--navy); color: var(--white);
+}
+.app-header h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: .2px; }
+
+.sync-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: .78rem; padding: 5px 10px; border-radius: 999px;
+  background: rgba(255,255,255,.12);
+}
+.sync-badge .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.sync-badge.offline { background: rgba(208,73,58,.22); }
+.sync-badge.offline .dot { background: var(--danger); }
+.sync-badge.pending { background: rgba(224,138,30,.22); }
+.sync-badge.pending .dot { background: var(--warn); }
+
+/* --- View --- */
+.view {
+  padding: 16px;
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 16px);
+  max-width: 640px; margin: 0 auto;
+}
+.view h2 { font-size: 1.3rem; margin: 4px 0 16px; }
+
+/* --- Tab bar --- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  height: calc(var(--tabbar-h) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  background: var(--white); border-top: 1px solid var(--line);
+}
+.tabbar button {
+  border: 0; background: none; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; color: var(--muted); font-size: .7rem; font-weight: 500;
+}
+.tabbar button .ic { font-size: 1.35rem; line-height: 1; }
+.tabbar button.active { color: var(--aqua-dark); }
+
+/* --- Cards / placeholders --- */
+.card {
+  background: var(--white); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 18px; margin-bottom: 14px;
+}
+.placeholder { text-align: center; color: var(--muted); padding: 40px 16px; }
+.placeholder .big { font-size: 2.4rem; margin-bottom: 8px; }
+
+/* --- Buttons --- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: var(--tap); width: 100%; gap: 8px;
+  border: 0; border-radius: var(--radius); cursor: pointer;
+  font-size: 1.02rem; font-weight: 600; padding: 0 18px;
+  background: var(--aqua-dark); color: var(--white);
+}
+.btn:disabled { opacity: .55; cursor: default; }
+.btn.secondary { background: var(--white); color: var(--ink); border: 1px solid var(--line); }
+
+/* --- Login --- */
+.login-wrap {
+  min-height: 100dvh; display: flex; flex-direction: column; justify-content: center;
+  padding: 24px; max-width: 420px; margin: 0 auto;
+}
+.login-logo { text-align: center; color: var(--white); margin-bottom: 28px; }
+.login-card { background: var(--white); border-radius: 22px; padding: 24px; box-shadow: 0 12px 40px rgba(12,34,51,.25); }
+.login-card h2 { margin: 0 0 4px; font-size: 1.25rem; }
+.login-card p.sub { margin: 0 0 20px; color: var(--muted); font-size: .9rem; }
+body.screen-login { background: linear-gradient(160deg, var(--navy), var(--navy-2)); }
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: .82rem; font-weight: 600; margin-bottom: 6px; color: var(--ink); }
+.field input {
+  width: 100%; min-height: var(--tap); border: 1px solid var(--line);
+  border-radius: 12px; padding: 0 14px; font-size: 1.1rem; background: #fbfdfe;
+}
+.field input:focus { outline: 2px solid var(--aqua); border-color: var(--aqua); }
+input.pin { letter-spacing: .4em; text-align: center; font-size: 1.4rem; }
+
+.form-error { color: var(--danger); font-size: .88rem; margin: 0 0 12px; min-height: 1.1em; }
+.spinner { display: inline-block; width: 18px; height: 18px; border: 2.5px solid rgba(255,255,255,.5); border-top-color: #fff; border-radius: 50%; animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }

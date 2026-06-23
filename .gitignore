@@ -1,0 +1,12 @@
+# Backend
+backend/data/
+backend/.secret_key
+backend/.env
+backend/*.log
+__pycache__/
+*.pyc
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+.vscode/

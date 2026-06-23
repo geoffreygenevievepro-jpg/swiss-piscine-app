@@ -1,0 +1,17 @@
+{
+  "name": "Swiss Piscine — Équipe",
+  "short_name": "SP Équipe",
+  "description": "App des équipes terrain Swiss Piscine : pointage, planning, interventions.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0c2233",
+  "theme_color": "#0c2233",
+  "lang": "fr",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
