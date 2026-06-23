@@ -1,6 +1,6 @@
 // Service worker — coquille hors-ligne (app shell). La file de synchro des
 // actions terrain (pointage, rapports) sera ajoutée au Sprint 2.
-const CACHE = "sp-app-shell-v1";
+const CACHE = "sp-app-shell-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -9,6 +9,7 @@ const ASSETS = [
   "./js/app.js",
   "./js/config.js",
   "./js/store.js",
+  "./js/util.js",
   "./js/api.js",
   "./js/screens/login.js",
   "./js/screens/terrain.js",
@@ -33,6 +34,9 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
+  // En dev (localhost), on ne touche jamais au cache : on sert toujours le fichier
+  // frais pour éviter de débugger une version périmée.
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return;
   // Ne jamais mettre en cache les appels API (auth, données) : réseau direct.
   if (e.request.method !== "GET" || url.pathname.startsWith("/api") || url.port === "8000") {
     return;
