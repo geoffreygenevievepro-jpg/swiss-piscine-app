@@ -60,6 +60,15 @@ Tous les modules nécessaires sont **déjà installés** (Odoo Enterprise, véri
 > les employés sans compte utilisateur Odoo). « Ma journée » n'affiche que les créneaux **du
 > jour** de l'employé ; l'app permet aussi d'en **créer un** (rôle Technicien, company 5).
 
+> **Rapport d'intervention (module clé — validé le 23/06)** : une seule form simple quel que
+> soit le type. **11 types** : Mise en service · Entretien · Dépannage · Hivernage · SAV ·
+> Montage · Bétonage · Local technique · Préparation Piscine · PVC · Pose Volet.
+> Champs : type · chrono Démarrer/Terminer · notes · matériel · photos · signature client.
+> **Stockage Odoo (sans module custom)** : note dans le **chatter** de la tâche du chantier
+> liée au créneau (sinon projet, sinon client) + photos/signature en `ir.attachment` + ligne
+> de temps `account.analytic.line` (best-effort). **Offline-first** : tout rapport est mis en
+> file IndexedDB puis poussé dès le retour réseau (badge « X en attente »).
+
 **Non installé** : `industry_fsm` (Field Service). Pas nécessaire — `project` + `planning`
 couvrent le besoin. À réévaluer seulement si on veut les worksheets natifs Odoo.
 

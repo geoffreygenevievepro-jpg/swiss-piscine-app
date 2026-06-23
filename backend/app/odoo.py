@@ -250,3 +250,104 @@ def search_partners(query: str, limit: int = 15) -> list[dict]:
         "res.partner", "search_read", [domain],
         {"fields": ["name", "city", "street", "zip"], "limit": limit, "order": "name"},
     )
+
+
+# --- Rapport d'intervention -----------------------------------------------
+
+REPORT_TYPES = [
+    "Mise en service", "Entretien", "Dépannage", "Hivernage", "SAV", "Montage",
+    "Bétonage", "Local technique", "Préparation Piscine", "PVC", "Pose Volet",
+]
+
+
+def _strip_data_url(b64: str) -> str:
+    """Enlève l'éventuel préfixe data:...;base64, d'une image."""
+    return b64.split(",", 1)[1] if b64.startswith("data:") else b64
+
+
+def _esc(s: str) -> str:
+    return (str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def _build_report_html(report: dict, employee_name: str) -> str:
+    rows = [
+        ("Type d'intervention", report.get("type")),
+        ("Technicien", employee_name),
+        ("Horaire", report.get("schedule")),
+        ("Durée", f'{report["hours"]:.2f} h' if report.get("hours") else None),
+        ("Matériel utilisé", report.get("materials")),
+    ]
+    html = ["<p><strong>📋 Rapport d'intervention</strong></p><ul>"]
+    for label, val in rows:
+        if val:
+            html.append(f"<li><strong>{_esc(label)} :</strong> {_esc(val)}</li>")
+    html.append("</ul>")
+    if report.get("notes"):
+        html.append(f"<p><strong>Notes :</strong><br>{_esc(report['notes'])}</p>")
+    return "".join(html)
+
+
+def _slot_target(slot: dict, slot_id: int) -> tuple[str, int]:
+    """Record Odoo où ranger le rapport : tâche > chantier > client > créneau."""
+    if slot.get("task_id"):
+        return "project.task", slot["task_id"][0]
+    if slot.get("project_id"):
+        return "project.project", slot["project_id"][0]
+    if slot.get("partner_id"):
+        return "res.partner", slot["partner_id"][0]
+    return "planning.slot", slot_id
+
+
+def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report: dict) -> dict | None:
+    """Enregistre le rapport dans Odoo : note chatter + photos/signature + temps.
+
+    Restreint au créneau assigné à l'employé. Renvoie None si non autorisé.
+    """
+    ro = get_client()
+    rows = ro.execute_kw(
+        "planning.slot", "search_read",
+        [[["id", "=", slot_id], ["employee_ids", "in", [hr_employee_id]]] + _company_domain()],
+        {"fields": ["task_id", "project_id", "partner_id", "name"], "limit": 1},
+    )
+    if not rows:
+        return None
+    slot = rows[0]
+    model, rid = _slot_target(slot, slot_id)
+    rw = get_write_client()
+
+    # Pièces jointes : photos + signature.
+    att_ids: list[int] = []
+    for i, photo in enumerate(report.get("photos", [])):
+        att_ids.append(rw.execute_kw("ir.attachment", "create", [{
+            "name": f"photo_{i + 1}.jpg", "datas": _strip_data_url(photo),
+            "res_model": model, "res_id": rid, "mimetype": "image/jpeg",
+        }]))
+    if report.get("signature"):
+        att_ids.append(rw.execute_kw("ir.attachment", "create", [{
+            "name": "signature_client.png", "datas": _strip_data_url(report["signature"]),
+            "res_model": model, "res_id": rid, "mimetype": "image/png",
+        }]))
+
+    # Note dans le chatter du chantier.
+    rw.execute_kw(model, "message_post", [[rid]], {
+        "body": _build_report_html(report, employee_name),
+        "attachment_ids": att_ids,
+    })
+
+    # Ligne de temps (best-effort : ne bloque pas le rapport si elle échoue).
+    timesheet_ok = False
+    if slot.get("task_id") and report.get("hours"):
+        try:
+            rw.execute_kw("account.analytic.line", "create", [{
+                "task_id": slot["task_id"][0],
+                "project_id": slot["project_id"][0] if slot.get("project_id") else False,
+                "employee_id": hr_employee_id,
+                "unit_amount": float(report["hours"]),
+                "name": report.get("type") or "Intervention",
+            }])
+            timesheet_ok = True
+        except Exception:
+            timesheet_ok = False
+
+    return {"ok": True, "model": model, "res_id": rid,
+            "attachments": len(att_ids), "timesheet": timesheet_ok}

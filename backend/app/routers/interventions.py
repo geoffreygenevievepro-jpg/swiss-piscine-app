@@ -16,6 +16,16 @@ class NewIntervention(BaseModel):
     partner_id: int | None = None
 
 
+class Report(BaseModel):
+    type: str = Field(..., min_length=1)
+    notes: str | None = None
+    materials: str | None = None
+    schedule: str | None = None       # ex. "08:00 – 10:30" (affichage)
+    hours: float | None = None        # durée en heures (pour le timesheet)
+    photos: list[str] = []            # images base64 (data URL acceptée)
+    signature: str | None = None      # image base64 (data URL acceptée)
+
+
 @router.get("/interventions/today")
 def today(emp=Depends(get_current_employee)):
     return odoo.today_interventions(emp["hr_employee_id"])
@@ -52,3 +62,19 @@ def partners(q: str, emp=Depends(get_current_employee)):
     if len(q.strip()) < 2:
         return []
     return odoo.search_partners(q.strip())
+
+
+@router.get("/report-types")
+def report_types(emp=Depends(get_current_employee)):
+    return odoo.REPORT_TYPES
+
+
+@router.post("/interventions/{slot_id}/report", status_code=201)
+def submit_report(slot_id: int, body: Report, emp=Depends(get_current_employee)):
+    try:
+        res = odoo.submit_report(emp["hr_employee_id"], emp["name"], slot_id, body.model_dump())
+    except Exception as e:
+        raise HTTPException(502, f"Odoo indisponible : {e}")
+    if res is None:
+        raise HTTPException(404, "Intervention introuvable ou non assignée")
+    return res

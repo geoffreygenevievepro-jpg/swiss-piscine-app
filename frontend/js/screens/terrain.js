@@ -2,7 +2,8 @@
 // + ajout d'une intervention. Le détail montre les infos client (appel, itinéraire).
 import { api } from "../api.js";
 import { profile } from "../store.js";
-import { escapeHtml } from "../util.js";
+import { escapeHtml, toast } from "../util.js";
+import { renderReport } from "./report.js";
 
 export const terrain = {
   id: "terrain",
@@ -96,10 +97,13 @@ async function renderDetail(root, prenom, slotId) {
       ${tel ? `<a class="btn" href="tel:${escapeHtml(tel)}" style="text-decoration:none">📞 Appeler</a>` : ""}
       ${maps ? `<a class="btn secondary" href="${maps}" target="_blank" rel="noopener" style="text-decoration:none">🗺️ Itinéraire</a>` : ""}
     </div>` : ""}
-    <div class="card" style="text-align:center;color:var(--muted);margin-top:14px">
-      Le rapport d'intervention (photos, signature) arrive au Sprint 2.
-    </div>`;
+    <button class="btn" id="do-report" style="margin-top:16px">📝 Faire le rapport</button>`;
   root.querySelector("#back").addEventListener("click", () => terrain.render(root));
+  root.querySelector("#do-report").addEventListener("click", () =>
+    renderReport(root, { id: slotId, label: s.label }, (msg) => {
+      terrain.render(root);
+      if (msg) toast(msg);
+    }));
 }
 
 function renderForm(root, prenom) {

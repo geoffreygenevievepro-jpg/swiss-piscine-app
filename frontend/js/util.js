@@ -37,3 +37,15 @@ export function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
+
+// Notification éphémère en bas d'écran.
+export function toast(msg) {
+  const el = document.createElement("div");
+  el.textContent = msg;
+  el.style.cssText =
+    "position:fixed;left:50%;bottom:84px;transform:translateX(-50%);z-index:50;" +
+    "background:var(--navy);color:#fff;padding:12px 18px;border-radius:999px;" +
+    "font-size:.9rem;box-shadow:0 8px 24px rgba(12,34,51,.3);max-width:90%;text-align:center";
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}

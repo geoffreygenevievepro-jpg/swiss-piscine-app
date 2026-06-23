@@ -2,6 +2,7 @@
 // synchro, enregistrement du service worker.
 import { tokens } from "./store.js";
 import { logout as apiLogout } from "./api.js";
+import { sync as syncOutbox, count as outboxCount } from "./outbox.js";
 import { renderLogin } from "./screens/login.js";
 import { terrain } from "./screens/terrain.js";
 import { pointer } from "./screens/pointer.js";
@@ -16,16 +17,26 @@ function ctx() {
   return { navigate: mountApp, logout: doLogout };
 }
 
-function updateSyncBadge() {
+async function updateSyncBadge() {
   const badge = document.getElementById("sync-badge");
   if (!badge) return;
+  const pending = await outboxCount();
   if (!navigator.onLine) {
     badge.className = "sync-badge offline";
-    badge.querySelector(".txt").textContent = "Hors ligne";
+    badge.querySelector(".txt").textContent = pending ? `Hors ligne · ${pending}` : "Hors ligne";
+  } else if (pending) {
+    badge.className = "sync-badge pending";
+    badge.querySelector(".txt").textContent = `${pending} en attente`;
   } else {
     badge.className = "sync-badge";
     badge.querySelector(".txt").textContent = "À jour";
   }
+}
+
+// Tente d'envoyer les rapports en file, puis rafraîchit le badge.
+async function flushOutbox() {
+  if (navigator.onLine && tokens.access) await syncOutbox();
+  updateSyncBadge();
 }
 
 function mountApp(screenId = current) {
@@ -69,7 +80,7 @@ function boot() {
   else mountAuth();
 }
 
-window.addEventListener("online", updateSyncBadge);
+window.addEventListener("online", flushOutbox);
 window.addEventListener("offline", updateSyncBadge);
 
 if ("serviceWorker" in navigator) {
@@ -79,3 +90,4 @@ if ("serviceWorker" in navigator) {
 }
 
 boot();
+flushOutbox();
