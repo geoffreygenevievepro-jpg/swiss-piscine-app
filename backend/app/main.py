@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .config import settings
-from .routers import attendance, auth, me, tasks
+from .routers import attendance, auth, interventions, me
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
@@ -30,4 +30,4 @@ def health() -> dict:
 app.include_router(auth.router)
 app.include_router(me.router)
 app.include_router(attendance.router)
-app.include_router(tasks.router)
+app.include_router(interventions.router)

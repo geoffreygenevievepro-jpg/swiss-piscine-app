@@ -159,50 +159,94 @@ def check_out(hr_employee_id: int) -> dict:
     return attendance_status(hr_employee_id)
 
 
-# --- Interventions (project.task) -----------------------------------------
+# --- Interventions (planning.slot) ----------------------------------------
+# Les interventions sont planifiées dans le module Planning. Le filtrage se fait
+# sur employee_ids (hr.employee), donc fonctionne même pour les employés sans
+# compte utilisateur Odoo.
 
-_TASK_FIELDS = ["name", "partner_id", "date_deadline", "stage_id", "project_id", "priority", "state"]
-# États considérés comme "clos" : exclus de « Ma journée ».
-_CLOSED_STATES = ["1_done", "1_canceled"]
+_SLOT_FIELDS = ["start_datetime", "end_datetime", "partner_id", "project_id",
+                "task_id", "role_id", "name", "allocated_hours", "state"]
+ROLE_TECHNICIEN_ID = 34  # planning.role "Technicien"
+_PARTNER_FIELDS = ["name", "street", "street2", "zip", "city", "phone", "email"]
 
 
-def today_tasks(hr_employee_id: int) -> dict:
-    """Interventions ouvertes assignées à l'employé (project.task), company 5."""
-    user_id = _employee_user_id(hr_employee_id)
-    if not user_id:
-        return {"user_linked": False, "tasks": []}
+def _slot_label(slot: dict) -> str:
+    """Libellé lisible d'un créneau : description libre, sinon tâche/chantier."""
+    if slot.get("name"):
+        return slot["name"]
+    for key in ("task_id", "project_id", "partner_id"):
+        if slot.get(key):
+            return slot[key][1]
+    return "Intervention"
+
+
+def local_dt_to_utc(date_str: str, time_str: str) -> str:
+    """Convertit une date+heure locale (Europe/Zurich) en datetime Odoo (UTC)."""
+    local = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=TZ)
+    return local.astimezone(timezone.utc).strftime(ODOO_FMT)
+
+
+def today_interventions(hr_employee_id: int) -> dict:
+    """Créneaux planifiés DU JOUR pour l'employé (planning.slot, company 5)."""
     client = get_client()
+    start, end = _today_bounds_utc()
     domain = [
-        ["user_ids", "in", [user_id]],
-        ["state", "not in", _CLOSED_STATES],
+        ["employee_ids", "in", [hr_employee_id]],
+        ["start_datetime", ">=", start],
+        ["start_datetime", "<", end],
     ] + _company_domain()
-    tasks = client.execute_kw(
-        "project.task", "search_read", [domain],
-        {"fields": _TASK_FIELDS, "order": "date_deadline asc, priority desc", "limit": 60},
+    slots = client.execute_kw(
+        "planning.slot", "search_read", [domain],
+        {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
     )
-    return {"user_linked": True, "tasks": tasks}
+    for s in slots:
+        s["label"] = _slot_label(s)
+    return {"interventions": slots}
 
 
-def task_detail(task_id: int, hr_employee_id: int) -> dict | None:
-    """Détail d'une intervention + infos client. Restreint aux tâches assignées à l'employé."""
-    user_id = _employee_user_id(hr_employee_id)
-    if not user_id:
-        return None
+def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
+    """Détail d'un créneau + infos client. Restreint aux créneaux de l'employé."""
     client = get_client()
-    domain = [["id", "=", task_id], ["user_ids", "in", [user_id]]] + _company_domain()
+    domain = [["id", "=", slot_id], ["employee_ids", "in", [hr_employee_id]]] + _company_domain()
     rows = client.execute_kw(
-        "project.task", "search_read", [domain],
-        {"fields": _TASK_FIELDS + ["description", "planned_date_begin"], "limit": 1},
+        "planning.slot", "search_read", [domain],
+        {"fields": _SLOT_FIELDS + ["employee_ids"], "limit": 1},
     )
     if not rows:
         return None
-    task = rows[0]
-    partner = None
-    if task.get("partner_id"):
+    slot = rows[0]
+    slot["label"] = _slot_label(slot)
+    slot["partner"] = None
+    if slot.get("partner_id"):
         prows = client.execute_kw(
-            "res.partner", "read", [[task["partner_id"][0]]],
-            {"fields": ["name", "street", "street2", "zip", "city", "phone", "mobile", "email"]},
+            "res.partner", "read", [[slot["partner_id"][0]]], {"fields": _PARTNER_FIELDS},
         )
-        partner = prows[0] if prows else None
-    task["partner"] = partner
-    return task
+        slot["partner"] = prows[0] if prows else None
+    return slot
+
+
+def create_intervention(hr_employee_id: int, name: str, start_utc: str,
+                        end_utc: str, partner_id: int | None = None) -> int:
+    """Crée un créneau planning.slot assigné à l'employé (company 5, rôle Technicien)."""
+    vals = {
+        "employee_ids": [(6, 0, [hr_employee_id])],
+        "start_datetime": start_utc,
+        "end_datetime": end_utc,
+        "company_id": settings.company_id,
+        "role_id": ROLE_TECHNICIEN_ID,
+    }
+    if name:
+        vals["name"] = name
+    if partner_id:
+        vals["partner_id"] = partner_id
+    return get_write_client().execute_kw("planning.slot", "create", [vals])
+
+
+def search_partners(query: str, limit: int = 15) -> list[dict]:
+    """Recherche de clients (res.partner) par nom ou ville, pour le formulaire."""
+    client = get_client()
+    domain = ["|", ["name", "ilike", query], ["city", "ilike", query]]
+    return client.execute_kw(
+        "res.partner", "search_read", [domain],
+        {"fields": ["name", "city", "street", "zip"], "limit": limit, "order": "name"},
+    )

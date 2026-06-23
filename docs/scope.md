@@ -49,11 +49,16 @@ Tous les modules nécessaires sont **déjà installés** (Odoo Enterprise, véri
 | Solde de congés | `hr.leave.allocation` + soldes calculés | `number_of_days` | lecture |
 | Fiche de salaire | `hr.payslip` (+ PDF `ir.attachment`) | `payslip_run_id`, PDF | lecture |
 | Certifications / compétences | `hr.skill`, `hr.resume.line` | — | lecture |
-| Planning de la semaine | `planning.slot` | `start_datetime`, `resource_id` | lecture |
-| Interventions du jour | `project.task` | `partner_id`, `date_deadline`, `stage_id` | lecture / écriture |
-| Rapport d'intervention | `project.task` + `ir.attachment` (photos) | worksheet, notes, signature | écriture |
+| Planning de la semaine | `planning.slot` | `start_datetime`, `employee_ids` | lecture |
+| Interventions du jour | `planning.slot` | `employee_ids`, `start_datetime`, `partner_id`, `project_id` | lecture / création |
+| Rapport d'intervention | `planning.slot` (+ `project.task`) + `ir.attachment` (photos) | worksheet, notes, signature | écriture |
 | Chantier | `project.project` | `partner_id` | lecture |
-| Infos client | `res.partner` | `street`, `city`, `phone`, `mobile` | lecture |
+| Infos client | `res.partner` | `street`, `city`, `phone` (`mobile` n'existe plus en v19) | lecture |
+
+> **Logique de planning (validée le 23/06)** : les interventions sont planifiées dans le
+> module **Planning** (`planning.slot`), filtrées par `employee_ids` (donc visibles même pour
+> les employés sans compte utilisateur Odoo). « Ma journée » n'affiche que les créneaux **du
+> jour** de l'employé ; l'app permet aussi d'en **créer un** (rôle Technicien, company 5).
 
 **Non installé** : `industry_fsm` (Field Service). Pas nécessaire — `project` + `planning`
 couvrent le besoin. À réévaluer seulement si on veut les worksheets natifs Odoo.
