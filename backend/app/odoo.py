@@ -450,3 +450,47 @@ def payslip_pdf(hr_employee_id: int, payslip_id: int) -> dict | None:
     if not att:
         return {"available": False}
     return {"available": True, "name": att[0]["name"], "datas": att[0]["datas"]}
+
+
+# --- Semaine : planning + absences équipe -----------------------------------
+
+def _week_bounds() -> tuple[datetime, datetime]:
+    """Lundi 00:00 (local) du semaine courante et lundi suivant."""
+    now = datetime.now(TZ)
+    monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    return monday, monday + timedelta(days=7)
+
+
+def week_planning(hr_employee_id: int) -> dict:
+    """Créneaux de la semaine courante de l'employé, avec jour local pré-calculé."""
+    monday, next_monday = _week_bounds()
+    start = monday.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end = next_monday.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+    slots = ro.execute_kw(
+        "planning.slot", "search_read",
+        [[["employee_ids", "in", [hr_employee_id]],
+          ["start_datetime", ">=", start], ["start_datetime", "<", end]] + _company_domain()],
+        {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
+    )
+    for s in slots:
+        s["label"] = _slot_label(s)
+        s["day"] = _parse_odoo_dt(s["start_datetime"]).astimezone(TZ).date().isoformat()
+    return {"week_start": monday.date().isoformat(), "slots": slots}
+
+
+def team_absences() -> dict:
+    """Absences validées de l'équipe (company 5) chevauchant la semaine courante."""
+    monday, next_monday = _week_bounds()
+    week_from = monday.date().isoformat()
+    week_to = (next_monday - timedelta(days=1)).date().isoformat()
+    ro = get_client()
+    leaves = ro.execute_kw(
+        "hr.leave", "search_read",
+        [[["employee_company_id", "=", settings.company_id],
+          ["state", "in", ["validate", "validate1"]],
+          ["request_date_from", "<=", week_to], ["request_date_to", ">=", week_from]]],
+        {"fields": ["employee_id", "work_entry_type_id", "request_date_from", "request_date_to"],
+         "order": "request_date_from asc"},
+    )
+    return {"week_start": week_from, "absences": leaves}

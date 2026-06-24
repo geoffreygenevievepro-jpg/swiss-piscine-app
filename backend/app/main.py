@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .config import settings
-from .routers import attendance, auth, interventions, me, rh
+from .routers import attendance, auth, interventions, me, rh, week
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 
@@ -32,3 +32,4 @@ app.include_router(me.router)
 app.include_router(attendance.router)
 app.include_router(interventions.router)
 app.include_router(rh.router)
+app.include_router(week.router)
