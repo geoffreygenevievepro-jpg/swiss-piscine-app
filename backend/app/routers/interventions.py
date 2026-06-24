@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from .. import odoo
 from ..deps import get_current_employee
+from ..errors import odoo_unavailable
 
 router = APIRouter(tags=["interventions"])
 
@@ -53,7 +54,7 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
             emp["hr_employee_id"], body.name, start_utc, end_utc, body.partner_id,
         )
     except Exception as e:
-        raise HTTPException(502, f"Odoo indisponible : {e}")
+        raise odoo_unavailable(e)
     return {"id": slot_id}
 
 
@@ -74,7 +75,7 @@ def submit_report(slot_id: int, body: Report, emp=Depends(get_current_employee))
     try:
         res = odoo.submit_report(emp["hr_employee_id"], emp["name"], slot_id, body.model_dump())
     except Exception as e:
-        raise HTTPException(502, f"Odoo indisponible : {e}")
+        raise odoo_unavailable(e)
     if res is None:
         raise HTTPException(404, "Intervention introuvable ou non assignée")
     return res

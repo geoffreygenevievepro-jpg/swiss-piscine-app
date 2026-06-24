@@ -82,6 +82,8 @@ function boot() {
 
 window.addEventListener("online", flushOutbox);
 window.addEventListener("offline", updateSyncBadge);
+// Session totalement expirée (refresh échoué) → retour à l'écran de connexion.
+window.addEventListener("auth-expired", () => { current = terrain.id; mountAuth(); });
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

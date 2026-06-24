@@ -31,21 +31,54 @@ async function tryRefresh() {
   return true;
 }
 
-// Appel authentifié avec une tentative de refresh transparente sur 401.
+// --- Cache léger des GET (lecture hors-ligne) ---
+const CACHE_PREFIX = "sp_cache_";
+function cachePut(path, data) {
+  try { localStorage.setItem(CACHE_PREFIX + path, JSON.stringify(data)); } catch {}
+}
+function cacheGet(path) {
+  try {
+    const v = localStorage.getItem(CACHE_PREFIX + path);
+    return v === null ? undefined : JSON.parse(v);
+  } catch { return undefined; }
+}
+
+// Session totalement expirée : on purge et on signale à l'app de revenir au login.
+function authExpired() {
+  tokens.clear();
+  window.dispatchEvent(new Event("auth-expired"));
+}
+
+// Appel authentifié : refresh transparent sur 401, repli sur le cache hors-ligne.
 export async function api(path, opts = {}) {
-  let res = await rawFetch(path, opts);
-  if (res.status === 401 && opts.auth !== false) {
-    if (await tryRefresh()) {
-      res = await rawFetch(path, opts);
+  const isGet = !opts.method || opts.method === "GET";
+  try {
+    let res = await rawFetch(path, opts);
+    if (res.status === 401 && opts.auth !== false) {
+      if (await tryRefresh()) {
+        res = await rawFetch(path, opts);
+      } else {
+        authExpired();
+        throw new ApiError("Session expirée", 401);
+      }
     }
+    if (!res.ok) {
+      let detail = res.statusText;
+      try { detail = (await res.json()).detail || detail; } catch {}
+      throw new ApiError(detail, res.status);
+    }
+    const data = res.status === 204 ? null : await res.json();
+    // On ne met pas en cache les gros binaires (PDF de paie).
+    if (isGet && !path.includes("/pdf")) cachePut(path, data);
+    return data;
+  } catch (e) {
+    // Réseau coupé sur un GET : on sert la dernière donnée connue.
+    if (isGet && !(e instanceof ApiError)) {
+      const cached = cacheGet(path);
+      if (cached !== undefined) return cached;
+    }
+    throw e;
   }
-  if (!res.ok) {
-    let detail = res.statusText;
-    try { detail = (await res.json()).detail || detail; } catch {}
-    throw new ApiError(detail, res.status);
-  }
-  if (res.status === 204) return null;
-  return res.json();
 }
 
 // --- Auth ---

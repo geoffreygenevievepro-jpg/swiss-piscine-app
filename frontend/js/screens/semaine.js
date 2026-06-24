@@ -24,6 +24,12 @@ export const semaine = {
 
 function hm(dt) { return dt ? dt.slice(11, 16) : ""; }
 
+// Date locale au format YYYY-MM-DD (sans bascule UTC, qui décalait d'un jour).
+function localISO(d) {
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 function renderWeek(root, planning, absences) {
   const start = new Date(planning.week_start + "T00:00:00");
   const byDay = {};
@@ -32,9 +38,9 @@ function renderWeek(root, planning, absences) {
   const days = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(start.getTime() + i * 86400000);
-    const iso = d.toISOString().slice(0, 10);
+    const iso = localISO(d);
     const slots = byDay[iso] || [];
-    const isToday = iso === new Date().toISOString().slice(0, 10);
+    const isToday = iso === localISO(new Date());
     days.push(`
       <div class="card" style="margin-bottom:10px;${isToday ? "border-color:var(--aqua)" : ""}">
         <div style="display:flex;justify-content:space-between;align-items:baseline">

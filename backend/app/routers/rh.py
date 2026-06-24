@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from .. import odoo
 from ..deps import get_current_employee
+from ..errors import odoo_unavailable
 
 router = APIRouter(prefix="/rh", tags=["rh"])
 
@@ -39,7 +40,7 @@ def create_leave(body: NewLeave, emp=Depends(get_current_employee)):
             emp["hr_employee_id"], body.type_id, body.date_from, body.date_to, body.name,
         )
     except Exception as e:
-        raise HTTPException(502, f"Demande impossible : {e}")
+        raise odoo_unavailable(e)
     return {"id": leave_id}
 
 

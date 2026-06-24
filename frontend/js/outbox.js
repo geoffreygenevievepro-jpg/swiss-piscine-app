@@ -65,9 +65,10 @@ export async function sync() {
         await api(`/interventions/${item.slotId}/report`, { method: "POST", body: item.payload });
         await remove(item.id);
       } catch (e) {
-        // 4xx = rapport invalide → on le retire pour ne pas boucler ; 5xx/réseau → on garde.
-        if (e.status && e.status >= 400 && e.status < 500) await remove(item.id);
-        else break; // réseau/serveur : on réessaiera plus tard
+        // On ne retire que si le rapport est définitivement invalide (400/422).
+        // Auth expirée (401/403), réseau ou serveur (5xx) → on garde et on réessaiera.
+        if (e.status === 400 || e.status === 422) await remove(item.id);
+        else break;
       }
     }
   } finally {
