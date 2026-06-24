@@ -10,11 +10,13 @@ router = APIRouter(tags=["interventions"])
 
 
 class NewIntervention(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
-    date: str                       # YYYY-MM-DD (heure locale)
-    start_time: str = "08:00"       # HH:MM
-    end_time: str = "09:00"         # HH:MM
-    partner_id: int | None = None
+    name: str = Field("", max_length=400)        # description
+    type: str | None = None                      # type d'intervention
+    date: str                                    # YYYY-MM-DD (heure locale)
+    start_time: str = "08:00"                    # HH:MM
+    end_time: str = "09:00"                       # HH:MM
+    partner_id: int                              # client OBLIGATOIRE
+    photos: list[str] = []                       # images base64 (data URL acceptée)
 
 
 class Report(BaseModel):
@@ -28,8 +30,8 @@ class Report(BaseModel):
 
 
 @router.get("/interventions/today")
-def today(emp=Depends(get_current_employee)):
-    return odoo.today_interventions(emp["hr_employee_id"])
+def today(date: str | None = None, emp=Depends(get_current_employee)):
+    return odoo.today_interventions(emp["hr_employee_id"], date)
 
 
 @router.get("/interventions/{slot_id}")
@@ -51,7 +53,8 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
         raise HTTPException(422, "L'heure de fin doit être après l'heure de début")
     try:
         slot_id = odoo.create_intervention(
-            emp["hr_employee_id"], body.name, start_utc, end_utc, body.partner_id,
+            emp["hr_employee_id"], body.name, start_utc, end_utc,
+            body.partner_id, body.type, body.photos,
         )
     except Exception as e:
         raise odoo_unavailable(e)

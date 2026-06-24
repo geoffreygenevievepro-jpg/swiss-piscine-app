@@ -170,6 +170,78 @@ def check_out(hr_employee_id: int, lat=None, lng=None) -> dict:
     return attendance_status(hr_employee_id)
 
 
+def _employee_weekly_hours(hr_employee_id: int) -> float:
+    ro = get_client()
+    rows = ro.execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["resource_calendar_id"]})
+    if rows and rows[0].get("resource_calendar_id"):
+        cal = ro.execute_kw("resource.calendar", "read",
+                            [[rows[0]["resource_calendar_id"][0]]], {"fields": ["hours_per_week"]})
+        if cal and cal[0].get("hours_per_week"):
+            return cal[0]["hours_per_week"]
+    return 42.5
+
+
+def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 0) -> dict:
+    """Heures travaillées vs dues sur jour / semaine / mois, par bucket (jour)."""
+    now = datetime.now(TZ)
+    weekly = _employee_weekly_hours(hr_employee_id)
+    daily = weekly / 5
+
+    if period == "day":
+        day = (now + timedelta(days=offset)).date()
+        start_local = datetime(day.year, day.month, day.day, tzinfo=TZ)
+        end_local = start_local + timedelta(days=1)
+        dates = [day]
+        due_total = daily if day.weekday() < 5 else 0.0
+    elif period == "month":
+        y, m = now.year, now.month + offset
+        while m > 12:
+            m -= 12; y += 1
+        while m < 1:
+            m += 12; y -= 1
+        start_local = datetime(y, m, 1, tzinfo=TZ)
+        ny, nm = (y + 1, 1) if m == 12 else (y, m + 1)
+        end_local = datetime(ny, nm, 1, tzinfo=TZ)
+        dates, d = [], start_local.date()
+        while d < end_local.date():
+            dates.append(d); d += timedelta(days=1)
+        due_total = sum(daily for dd in dates if dd.weekday() < 5)
+    else:  # week
+        monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(weeks=offset)
+        start_local, end_local = monday, monday + timedelta(days=7)
+        dates = [(monday + timedelta(days=i)).date() for i in range(7)]
+        due_total = weekly
+
+    start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+    atts = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start_utc], ["check_in", "<", end_utc]]],
+        {"fields": ["check_in", "worked_hours"]},
+    )
+    worked_by = {d.isoformat(): 0.0 for d in dates}
+    for a in atts:
+        day = _parse_odoo_dt(a["check_in"]).astimezone(TZ).date().isoformat()
+        if day in worked_by:
+            worked_by[day] += a.get("worked_hours") or 0.0
+
+    buckets = []
+    for d in dates:
+        due = round(daily, 2) if d.weekday() < 5 else 0.0
+        w = round(worked_by[d.isoformat()], 2)
+        buckets.append({"date": d.isoformat(), "worked": w, "due": due, "solde": round(w - due, 2)})
+    worked_total = round(sum(worked_by.values()), 2)
+    return {
+        "period": period,
+        "start": start_local.date().isoformat(),
+        "buckets": buckets,
+        "worked_total": worked_total,
+        "due_total": round(due_total, 1),
+        "solde_total": round(worked_total - due_total, 2),
+    }
+
+
 # --- Interventions (planning.slot) ----------------------------------------
 # Les interventions sont planifiées dans le module Planning. Le filtrage se fait
 # sur employee_ids (hr.employee), donc fonctionne même pour les employés sans
@@ -197,10 +269,21 @@ def local_dt_to_utc(date_str: str, time_str: str) -> str:
     return local.astimezone(timezone.utc).strftime(ODOO_FMT)
 
 
-def today_interventions(hr_employee_id: int) -> dict:
-    """Créneaux planifiés DU JOUR pour l'employé (planning.slot, company 5)."""
+def _day_bounds_utc(date_iso: str | None) -> tuple[str, str]:
+    """Bornes UTC [00:00, 24:00[ du jour local donné (ou aujourd'hui si None)."""
+    if date_iso:
+        d = datetime.strptime(date_iso, "%Y-%m-%d").date()
+        start_local = datetime(d.year, d.month, d.day, tzinfo=TZ)
+        end_local = start_local + timedelta(days=1)
+        return (start_local.astimezone(timezone.utc).strftime(ODOO_FMT),
+                end_local.astimezone(timezone.utc).strftime(ODOO_FMT))
+    return _today_bounds_utc()
+
+
+def today_interventions(hr_employee_id: int, date_iso: str | None = None) -> dict:
+    """Créneaux planifiés du jour choisi (par défaut aujourd'hui) pour l'employé."""
     client = get_client()
-    start, end = _today_bounds_utc()
+    start, end = _day_bounds_utc(date_iso)
     domain = [
         ["employee_ids", "in", [hr_employee_id]],
         ["start_datetime", ">=", start],
@@ -236,9 +319,11 @@ def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
     return slot
 
 
-def create_intervention(hr_employee_id: int, name: str, start_utc: str,
-                        end_utc: str, partner_id: int | None = None) -> int:
-    """Crée un créneau planning.slot assigné à l'employé (company 5, rôle Technicien)."""
+def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc: str,
+                        partner_id: int | None = None, type_label: str | None = None,
+                        photos: list[str] | None = None) -> int:
+    """Crée un créneau planning.slot (company 5, rôle Technicien), + photos optionnelles."""
+    label = f"{type_label} — {name}" if (type_label and name) else (type_label or name)
     vals = {
         "employee_ids": [(6, 0, [hr_employee_id])],
         "start_datetime": start_utc,
@@ -246,11 +331,18 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str,
         "company_id": settings.company_id,
         "role_id": ROLE_TECHNICIEN_ID,
     }
-    if name:
-        vals["name"] = name
+    if label:
+        vals["name"] = label
     if partner_id:
         vals["partner_id"] = partner_id
-    return get_write_client().execute_kw("planning.slot", "create", [vals])
+    rw = get_write_client()
+    slot_id = rw.execute_kw("planning.slot", "create", [vals])
+    for i, photo in enumerate(photos or []):
+        rw.execute_kw("ir.attachment", "create", [{
+            "name": f"photo_{i + 1}.jpg", "datas": _strip_data_url(photo),
+            "res_model": "planning.slot", "res_id": slot_id, "mimetype": "image/jpeg",
+        }])
+    return slot_id
 
 
 def search_partners(query: str, limit: int = 15) -> list[dict]:
