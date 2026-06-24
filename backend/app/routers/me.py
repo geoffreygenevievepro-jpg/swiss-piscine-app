@@ -11,8 +11,10 @@ router = APIRouter(tags=["me"])
 def me(emp=Depends(get_current_employee)):
     """Profil employé : compte local + données fraîches depuis Odoo."""
     odoo_profile = None
+    extra = {}
     try:
         odoo_profile = odoo.get_employee(emp["hr_employee_id"])
+        extra = odoo.employee_extra(emp["hr_employee_id"])
     except Exception:
         # L'app reste utilisable même si Odoo est momentanément injoignable.
         odoo_profile = None
@@ -24,4 +26,7 @@ def me(emp=Depends(get_current_employee)):
         "role": emp["role"],
         "hr_employee_id": emp["hr_employee_id"],
         "odoo": odoo_profile,
+        "avatar": extra.get("avatar"),
+        "activity_rate": extra.get("activity_rate"),
+        "resume": extra.get("resume", []),
     }

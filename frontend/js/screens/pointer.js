@@ -1,13 +1,11 @@
-// Onglet POINTER — bouton de timbrage contextuel (Tipee-like).
-// Un seul gros bouton qui affiche Entrée OU Sortie selon l'état réel côté Odoo.
+// Onglet POINTER — bouton de timbrage contextuel + planifié/réalisé/reste (tipee go).
 import { api } from "../api.js";
-import { fmtDuration, fmtClock } from "../util.js";
+import { fmtDuration, fmtClock, escapeHtml } from "../util.js";
 
 let timer = null;
+const clearTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
 
-function clearTimer() {
-  if (timer) { clearInterval(timer); timer = null; }
-}
+const DAY_START = 6, DAY_END = 20, SPAN = DAY_END - DAY_START;  // frise 6 h → 20 h
 
 export const pointer = {
   id: "pointer",
@@ -17,74 +15,111 @@ export const pointer = {
   async render(root) {
     clearTimer();
     root.innerHTML = `<h2>Pointer</h2><div class="placeholder"><div class="big">⏱️</div>Chargement…</div>`;
-    let status;
+    let status, slots = [];
     try {
       status = await api("/attendance/status");
+      try { slots = (await api("/interventions/today")).interventions || []; } catch {}
     } catch {
       root.innerHTML = `<h2>Pointer</h2>
-        <div class="card" style="border-color:var(--danger)">
-          Impossible de joindre le serveur. Vérifie ta connexion et réessaie.
-        </div>`;
+        <div class="card" style="border-color:var(--danger)">Impossible de joindre le serveur.</div>`;
       return;
     }
-    draw(root, status);
+    draw(root, status, slots);
   },
 };
 
-function draw(root, status) {
+function localHour(dt) {
+  const d = new Date(dt.replace(" ", "T") + "Z");
+  return d.getHours() + d.getMinutes() / 60;
+}
+
+function plannedSeconds(slots) {
+  return slots.reduce((acc, s) => {
+    const a = new Date(s.start_datetime.replace(" ", "T") + "Z");
+    const b = new Date(s.end_datetime.replace(" ", "T") + "Z");
+    return acc + Math.max(0, (b - a) / 1000);
+  }, 0);
+}
+
+function timeline(slots) {
+  if (!slots.length) return "";
+  const bars = slots.map(s => {
+    const a = Math.max(DAY_START, localHour(s.start_datetime));
+    const b = Math.min(DAY_END, localHour(s.end_datetime));
+    const left = ((a - DAY_START) / SPAN) * 100;
+    const width = Math.max(3, ((b - a) / SPAN) * 100);
+    return `<div title="${escapeHtml(s.label || "")}" style="position:absolute;left:${left}%;width:${width}%;top:0;bottom:0;background:var(--aqua);border-radius:6px;opacity:.85"></div>`;
+  }).join("");
+  return `
+    <div style="font-size:.8rem;color:var(--muted);margin:2px 0 4px">Planifié</div>
+    <div style="position:relative;height:26px;background:#eef3f6;border-radius:6px;margin-bottom:4px">${bars}</div>
+    <div style="display:flex;justify-content:space-between;font-size:.65rem;color:var(--muted)">
+      <span>${DAY_START}h</span><span>${Math.round((DAY_START + DAY_END) / 2)}h</span><span>${DAY_END}h</span>
+    </div>`;
+}
+
+function draw(root, status, slots) {
   clearTimer();
   const isIn = status.state === "in";
   const openStart = isIn ? new Date(status.open_since).getTime() : null;
   const baseToday = status.today_seconds;
-  const t0 = Date.now();
+  const planned = plannedSeconds(slots);
+  const t0 = Date.now();  // instant du rendu (today_seconds inclut déjà la session jusqu'ici)
+  const dateStr = new Date().toLocaleDateString("fr-CH", { weekday: "long", day: "numeric", month: "long" });
+
+  const remainTile = planned > 0
+    ? `<div class="card" style="flex:1;margin:0;text-align:center">
+         <div style="font-size:1.3rem;font-weight:700" id="reste">${fmtDuration(Math.max(0, planned - baseToday))}</div>
+         <div style="font-size:.78rem;color:var(--muted)">Reste à faire</div></div>`
+    : "";
 
   root.innerHTML = `
-    <h2>Pointer</h2>
-    <div class="card" style="text-align:center;${isIn ? "border-color:var(--aqua)" : ""}">
-      <div style="color:var(--muted);font-size:.85rem">${isIn ? "Session en cours depuis" : "Tu n'es pas pointé"}</div>
-      <div id="elapsed" style="font-size:2.4rem;font-weight:700;margin:.2rem 0;color:var(--ink)">
-        ${isIn ? fmtClock(elapsedSince(openStart)) : "—"}
+    <h2 style="margin-bottom:2px">Pointer</h2>
+    <p style="color:var(--muted);margin:0 0 14px;text-transform:capitalize">${dateStr}</p>
+    ${timeline(slots)}
+    <div style="display:flex;gap:10px;margin:12px 0">
+      <div class="card" style="flex:1;margin:0;text-align:center;${isIn ? "border-color:var(--aqua)" : ""}">
+        <div id="elapsed" style="font-size:1.3rem;font-weight:700">${isIn ? fmtClock(elapsed(openStart)) : "—"}</div>
+        <div style="font-size:.78rem;color:var(--muted)">${isIn ? "En cours" : "Pas pointé"}</div>
       </div>
-      <div style="color:var(--muted);font-size:.9rem">
-        Total aujourd'hui : <strong id="today-total">${fmtDuration(baseToday)}</strong>
+      <div class="card" style="flex:1;margin:0;text-align:center">
+        <div id="today-total" style="font-size:1.3rem;font-weight:700">${fmtDuration(baseToday)}</div>
+        <div style="font-size:.78rem;color:var(--muted)">Réalisé</div>
       </div>
+      ${remainTile}
     </div>
     <button class="btn" id="punch" style="${isIn ? "background:var(--danger)" : ""}">
       ${isIn ? "⏹️ Pointer la sortie" : "▶️ Commencer ma journée"}
     </button>
     <p id="punch-msg" class="form-error" style="text-align:center;color:var(--ok);margin-top:14px"></p>`;
 
-  // Timer live (seconde par seconde) quand on est pointé.
   if (isIn) {
     timer = setInterval(() => {
-      const elapsedEl = root.querySelector("#elapsed");
-      const totalEl = root.querySelector("#today-total");
-      if (!elapsedEl) return clearTimer();
-      const extra = Math.floor((Date.now() - t0) / 1000);
-      elapsedEl.textContent = fmtClock(elapsedSince(openStart));
-      totalEl.textContent = fmtDuration(baseToday + extra);
+      const el = root.querySelector("#elapsed");
+      if (!el) return clearTimer();
+      const total = baseToday + Math.floor((Date.now() - t0) / 1000);
+      el.textContent = fmtClock(elapsed(openStart));
+      root.querySelector("#today-total").textContent = fmtDuration(total);
+      const reste = root.querySelector("#reste");
+      if (reste) reste.textContent = fmtDuration(Math.max(0, planned - total));
     }, 1000);
   }
 
   const btn = root.querySelector("#punch");
   const msg = root.querySelector("#punch-msg");
   btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.innerHTML = `<span class="spinner"></span>`;
+    btn.disabled = true; btn.innerHTML = `<span class="spinner"></span>`;
     try {
       const next = await api(isIn ? "/attendance/check-out" : "/attendance/check-in", { method: "POST" });
-      draw(root, next);
+      draw(root, next, slots);
       const m = root.querySelector("#punch-msg");
       if (m) m.textContent = isIn ? "Sortie enregistrée ✓" : "Entrée enregistrée ✓";
-    } catch (e) {
+    } catch {
       btn.disabled = false;
       btn.textContent = isIn ? "⏹️ Pointer la sortie" : "▶️ Commencer ma journée";
-      msg.style.color = "var(--danger)";
-      msg.textContent = "Échec du pointage. Réessaie.";
+      msg.style.color = "var(--danger)"; msg.textContent = "Échec du pointage. Réessaie.";
     }
   });
 }
 
-function elapsedSince(startMs) {
-  return Math.floor((Date.now() - startMs) / 1000);
-}
+function elapsed(startMs) { return Math.floor((Date.now() - startMs) / 1000); }

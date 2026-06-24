@@ -1,14 +1,16 @@
-// Onglet MOI — profil, soldes, congés (consultation + demande), fiches de salaire.
+// Onglet MOI — profil (avatar + taux), soldes en jauges, congés (badges + icônes),
+// demande de congé (types curés), fiches de salaire, parcours.
 import { api } from "../api.js";
 import { profile } from "../store.js";
 import { escapeHtml, toast } from "../util.js";
 
 const LEAVE_STATE = {
-  draft: "Brouillon", confirm: "À approuver", validate1: "1re validation",
-  validate: "Approuvé", refuse: "Refusé", cancel: "Annulé",
+  draft: ["Brouillon", "grey"], confirm: ["À valider", "pending"],
+  validate1: ["1re validation", "pending"], validate: ["Validé", "ok"],
+  refuse: ["Refusé", "danger"], cancel: ["Annulé", "grey"],
 };
 
-let _ctx = { logout: () => {} };  // conservé pour les sous-vues
+let _ctx = { logout: () => {} };
 
 export const moi = {
   id: "moi",
@@ -18,16 +20,8 @@ export const moi = {
   async render(root, ctx) {
     if (ctx) _ctx = ctx;
     const p = profile.get() || {};
-    const odoo = p.odoo || {};
     root.innerHTML = `
-      <h2>Mon profil</h2>
-      <div class="card">
-        <strong>${escapeHtml(p.name || "—")}</strong>
-        <p style="color:var(--muted);margin:.3rem 0 0">
-          ${escapeHtml(odoo.job_title || p.role || "")}<br>
-          ${escapeHtml(odoo.work_email || "")}<br>${escapeHtml(odoo.work_phone || "")}
-        </p>
-      </div>
+      ${profileHeader(p)}
       <div id="rh-zone"><div class="placeholder">Chargement…</div></div>
       <button class="btn secondary" id="logout-btn" style="margin-top:8px">Se déconnecter</button>`;
     root.querySelector("#logout-btn").addEventListener("click", _ctx.logout);
@@ -42,13 +36,31 @@ export const moi = {
       zone.innerHTML = `<div class="card" style="border-color:var(--danger)">Impossible de charger tes données RH.</div>`;
       return;
     }
-    renderRH(root, zone, balances, leaves, payslips);
+    renderRH(root, zone, balances, leaves, payslips, p);
   },
 };
 
-function renderRH(root, zone, balances, leaves, payslips) {
+function profileHeader(p) {
+  const odoo = p.odoo || {};
+  const sub = [odoo.job_title || p.role, p.activity_rate ? `${p.activity_rate} %` : null]
+    .filter(Boolean).join(" · ");
+  const avatar = p.avatar
+    ? `<img src="data:image/png;base64,${p.avatar}" alt="" style="width:60px;height:60px;border-radius:50%;object-fit:cover;flex:0 0 auto">`
+    : `<div style="width:60px;height:60px;border-radius:50%;background:var(--aqua-dark);color:#fff;display:flex;align-items:center;justify-content:center;font-size:1.5rem;font-weight:700;flex:0 0 auto">${escapeHtml((p.name || "?")[0])}</div>`;
+  return `
+    <div class="card" style="display:flex;gap:14px;align-items:center">
+      ${avatar}
+      <div style="min-width:0">
+        <strong style="font-size:1.1rem">${escapeHtml(p.name || "—")}</strong>
+        <div style="color:var(--muted);font-size:.9rem">${escapeHtml(sub)}</div>
+        ${odoo.work_phone ? `<div style="color:var(--muted);font-size:.82rem">${escapeHtml(odoo.work_phone)}</div>` : ""}
+      </div>
+    </div>`;
+}
+
+function renderRH(root, zone, balances, leaves, payslips, p) {
   zone.innerHTML = `
-    ${balanceCards(balances)}
+    ${balanceGauges(balances)}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center">
         <strong>Mes congés</strong>
@@ -59,7 +71,8 @@ function renderRH(root, zone, balances, leaves, payslips) {
     <div class="card">
       <strong>Mes fiches de salaire</strong>
       <div id="payslip-list" style="margin-top:10px">${payslipList(payslips)}</div>
-    </div>`;
+    </div>
+    ${resumeCard(p.resume)}`;
 
   root.querySelector("#ask-leave").addEventListener("click", () => renderLeaveForm(root));
   root.querySelector("#payslip-list").addEventListener("click", (e) => {
@@ -68,27 +81,33 @@ function renderRH(root, zone, balances, leaves, payslips) {
   });
 }
 
-function balanceCards(b) {
-  const items = b.leaves.map(l => gauge(l.name, `${l.remaining} ${l.unit === "hour" ? "h" : "j"}`));
-  items.push(gauge("Heures supp.", `${(b.overtime_hours || 0).toFixed(1)} h`));
-  return `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">${items.join("")}</div>`;
+// --- Jauges circulaires (conic-gradient), façon tipee go ---
+function balanceGauges(b) {
+  const rings = b.leaves.map(l =>
+    ring(`${l.remaining}`, l.unit === "hour" ? "h" : "j", `${l.icon} ${l.label}`, l.remaining, l.unit === "hour" ? 40 : 25));
+  rings.push(ring((b.overtime_hours || 0).toFixed(1), "h", "⏱️ Solde d'heures", Math.abs(b.overtime_hours || 0), 20));
+  return `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">${rings.join("")}</div>`;
 }
 
-function gauge(label, value) {
-  return `<div class="card" style="flex:1;min-width:130px;text-align:center;margin:0">
-    <div style="font-size:1.6rem;font-weight:700;color:var(--aqua-dark)">${escapeHtml(value)}</div>
-    <div style="font-size:.8rem;color:var(--muted)">${escapeHtml(label)}</div>
+function ring(value, unit, label, val, refMax) {
+  const pct = Math.max(0.04, Math.min(1, (val || 0) / refMax));
+  const deg = Math.round(pct * 360);
+  return `<div class="card" style="flex:1;min-width:140px;text-align:center;margin:0">
+    <div class="ring" style="background:conic-gradient(var(--aqua) ${deg}deg, var(--line) ${deg}deg)">
+      <div class="ring-in"><span style="font-size:1.3rem;font-weight:700">${escapeHtml(value)}</span><span style="font-size:.7rem;color:var(--muted)">${unit}</span></div>
+    </div>
+    <div style="font-size:.8rem;color:var(--muted);margin-top:8px">${escapeHtml(label)}</div>
   </div>`;
 }
 
 function leaveList(leaves) {
   if (!leaves.length) return `<p style="color:var(--muted);margin:0">Aucune demande de congé.</p>`;
   return leaves.map(l => {
-    const type = l.work_entry_type_id ? l.work_entry_type_id[1] : "Congé";
-    return `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:1px solid var(--line)">
-      <div><strong>${escapeHtml(type)}</strong>
+    const [lbl, cls] = LEAVE_STATE[l.state] || [l.state, "grey"];
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--line)">
+      <div style="min-width:0"><strong>${l.icon || "🗓️"} ${escapeHtml(l.type_label || "Congé")}</strong>
         <div style="font-size:.82rem;color:var(--muted)">${l.request_date_from} → ${l.request_date_to} · ${l.number_of_days} j</div></div>
-      <span style="font-size:.78rem;align-self:center;color:var(--muted)">${escapeHtml(LEAVE_STATE[l.state] || l.state)}</span>
+      <span class="badge badge-${cls}">${escapeHtml(lbl)}</span>
     </div>`;
   }).join("");
 }
@@ -107,6 +126,19 @@ function payslipList(payslips) {
   }).join("");
 }
 
+function resumeCard(resume) {
+  if (!resume || !resume.length) return "";
+  const items = resume.map(r => {
+    const desc = (r.description || "").replace(/<[^>]+>/g, " ").trim();
+    return `<div style="padding:8px 0;border-top:1px solid var(--line)">
+      <strong>${escapeHtml(r.name)}</strong>
+      ${r.line_type_id ? `<span style="color:var(--muted);font-size:.8rem"> · ${escapeHtml(r.line_type_id[1])}</span>` : ""}
+      ${desc ? `<div style="color:var(--muted);font-size:.84rem;margin-top:2px">${escapeHtml(desc)}</div>` : ""}
+    </div>`;
+  }).join("");
+  return `<div class="card"><strong>Parcours & compétences</strong><div style="margin-top:8px">${items}</div></div>`;
+}
+
 async function downloadPayslip(id, name) {
   try {
     const res = await api(`/rh/payslips/${id}/pdf`);
@@ -123,7 +155,8 @@ async function renderLeaveForm(root) {
   let types = [];
   try { types = await api("/rh/leave-types"); } catch {}
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date();
+  const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
   root.innerHTML = `
     <button class="btn secondary" id="back" style="width:auto;min-height:40px;margin-bottom:14px">‹ Retour</button>
     <h2 style="margin-top:0">Demander un congé</h2>
@@ -131,11 +164,11 @@ async function renderLeaveForm(root) {
       <p class="form-error" id="leave-error"></p>
       <div class="field"><label>Type</label>
         <select id="l-type" style="width:100%;min-height:52px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem;background:#fbfdfe">
-          ${types.map(t => `<option value="${t.id}">${escapeHtml(t.name)}${t.remaining ? ` (${t.remaining} restant)` : ""}</option>`).join("")}
+          ${types.map(t => `<option value="${t.id}">${t.icon} ${escapeHtml(t.label)}${t.remaining ? ` (${t.remaining} restant)` : ""}</option>`).join("")}
         </select></div>
       <div style="display:flex;gap:10px">
-        <div class="field" style="flex:1"><label>Du</label><input id="l-from" type="date" value="${today}" required /></div>
-        <div class="field" style="flex:1"><label>Au</label><input id="l-to" type="date" value="${today}" required /></div>
+        <div class="field" style="flex:1"><label>Du</label><input id="l-from" type="date" value="${iso}" required /></div>
+        <div class="field" style="flex:1"><label>Au</label><input id="l-to" type="date" value="${iso}" required /></div>
       </div>
       <div class="field"><label>Motif (optionnel)</label><input id="l-name" type="text" placeholder="Ex. vacances d'été" /></div>
       <button class="btn" type="submit" id="l-submit">Envoyer la demande</button>

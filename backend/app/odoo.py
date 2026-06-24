@@ -358,54 +358,86 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
 # leave_validation_type) ; les soldes via virtual_remaining_leaves (contexte
 # employé). hr.leave = la demande ; net_wage sur hr.payslip.
 
-def leave_balances(hr_employee_id: int) -> dict:
-    """Soldes : congés restants par type (avec solde) + heures supplémentaires."""
-    ro = get_client()
-    types = ro.execute_kw(
-        "hr.work.entry.type", "search_read",
-        [[["leave_validation_type", "!=", False]]],
-        {"fields": ["name", "virtual_remaining_leaves", "request_unit"],
-         "context": {"employee_id": hr_employee_id}},
-    )
-    leaves = [
-        {"name": t["name"], "remaining": t.get("virtual_remaining_leaves") or 0.0,
-         "unit": t.get("request_unit")}
-        for t in types if t.get("virtual_remaining_leaves")
-    ]
-    leaves.sort(key=lambda x: -x["remaining"])
-    emp = ro.execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["total_overtime"]})
-    return {"leaves": leaves, "overtime_hours": emp[0]["total_overtime"] if emp else 0.0}
+# Libellés FR + icônes pour les types de congé (mappés sur les noms Odoo réels).
+# Seuls les types listés ici sont proposés/affichés — config curée, inspirée de Tipee.
+_LEAVE_LABELS = {
+    "Paid Time Off": ("🌴", "Vacances"),
+    "Salary in case of Illness": ("🤒", "Maladie"),
+    "Salary in case of Accident": ("🤕", "Accident"),
+    "Salary in case of Maternity / Paternity Leave": ("👶", "Maternité / Paternité"),
+    "Salary in case of Military Leave": ("🎖️", "Service militaire"),
+    "Unpaid": ("💸", "Congé sans solde"),
+    "Récuperation heure supp.": ("⏱️", "Récupération d'heures"),
+    "Compensatory Time Off": ("🔄", "Compensation"),
+    "Déménagement": ("📦", "Déménagement"),
+    "Extra Time Off": ("➕", "Congé supplémentaire"),
+}
+_LEAVE_ORDER = list(_LEAVE_LABELS.keys())
 
 
-def leave_types(hr_employee_id: int) -> list[dict]:
-    """Types de congé sélectionnables pour une demande (reflète la config Odoo)."""
+def _friendly_leave(name: str | None) -> tuple[str, str]:
+    """(icône, libellé FR) pour un type de congé ; repli sur le nom Odoo brut."""
+    if name and name in _LEAVE_LABELS:
+        return _LEAVE_LABELS[name]
+    return ("🗓️", name or "Congé")
+
+
+def _leave_types_raw(hr_employee_id: int) -> list[dict]:
     ro = get_client()
-    types = ro.execute_kw(
+    return ro.execute_kw(
         "hr.work.entry.type", "search_read",
         [[["leave_validation_type", "!=", False]]],
         {"fields": ["name", "request_unit", "virtual_remaining_leaves"],
          "context": {"employee_id": hr_employee_id}},
     )
-    # Dédoublonnage par nom (la config Odoo a des types en double) + solde d'abord.
+
+
+def leave_balances(hr_employee_id: int) -> dict:
+    """Soldes : congés restants par type (avec solde) + heures supplémentaires."""
+    leaves = []
+    for t in _leave_types_raw(hr_employee_id):
+        if t.get("virtual_remaining_leaves"):
+            icon, label = _friendly_leave(t["name"])
+            leaves.append({"label": label, "icon": icon,
+                           "remaining": t["virtual_remaining_leaves"], "unit": t.get("request_unit")})
+    leaves.sort(key=lambda x: -x["remaining"])
+    emp = get_client().execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["total_overtime"]})
+    return {"leaves": leaves, "overtime_hours": emp[0]["total_overtime"] if emp else 0.0}
+
+
+def leave_types(hr_employee_id: int) -> list[dict]:
+    """Types de congé proposés (liste curée : libellés FR + icônes, dédoublonnés)."""
     by_name: dict[str, dict] = {}
-    for t in types:
-        if t["name"] not in by_name or (t.get("virtual_remaining_leaves") or 0) > (by_name[t["name"]].get("virtual_remaining_leaves") or 0):
+    for t in _leave_types_raw(hr_employee_id):
+        if t["name"] not in _LEAVE_LABELS:
+            continue  # on n'affiche que les types curés
+        cur = by_name.get(t["name"])
+        if cur is None or (t.get("virtual_remaining_leaves") or 0) > (cur.get("virtual_remaining_leaves") or 0):
             by_name[t["name"]] = t
-    uniq = sorted(by_name.values(),
-                  key=lambda t: (-(t.get("virtual_remaining_leaves") or 0.0), t["name"]))
-    return [{"id": t["id"], "name": t["name"], "remaining": t.get("virtual_remaining_leaves") or 0.0}
-            for t in uniq]
+    out = []
+    for raw_name in _LEAVE_ORDER:
+        t = by_name.get(raw_name)
+        if not t:
+            continue
+        icon, label = _LEAVE_LABELS[raw_name]
+        out.append({"id": t["id"], "label": label, "icon": icon,
+                    "remaining": t.get("virtual_remaining_leaves") or 0.0})
+    return out
 
 
 def my_leaves(hr_employee_id: int) -> list[dict]:
-    """Mes demandes de congé (les plus récentes)."""
+    """Mes demandes de congé (les plus récentes), avec icône + libellé FR."""
     ro = get_client()
-    return ro.execute_kw(
+    leaves = ro.execute_kw(
         "hr.leave", "search_read", [[["employee_id", "=", hr_employee_id]]],
         {"fields": ["work_entry_type_id", "request_date_from", "request_date_to",
                     "number_of_days", "state", "name"],
          "order": "request_date_from desc", "limit": 20},
     )
+    for l in leaves:
+        name = l["work_entry_type_id"][1] if l.get("work_entry_type_id") else None
+        l["icon"], l["type_label"] = _friendly_leave(name)
+    return leaves
 
 
 def create_leave(hr_employee_id: int, type_id: int, date_from: str, date_to: str, name: str) -> int:
@@ -454,16 +486,17 @@ def payslip_pdf(hr_employee_id: int, payslip_id: int) -> dict | None:
 
 # --- Semaine : planning + absences équipe -----------------------------------
 
-def _week_bounds() -> tuple[datetime, datetime]:
-    """Lundi 00:00 (local) du semaine courante et lundi suivant."""
+def _week_bounds(offset: int = 0) -> tuple[datetime, datetime]:
+    """Lundi 00:00 (local) de la semaine (offset en semaines) et lundi suivant."""
     now = datetime.now(TZ)
     monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
+    monday += timedelta(weeks=offset)
     return monday, monday + timedelta(days=7)
 
 
-def week_planning(hr_employee_id: int) -> dict:
-    """Créneaux de la semaine courante de l'employé, avec jour local pré-calculé."""
-    monday, next_monday = _week_bounds()
+def week_planning(hr_employee_id: int, offset: int = 0) -> dict:
+    """Créneaux de la semaine (offset) de l'employé, avec jour local pré-calculé."""
+    monday, next_monday = _week_bounds(offset)
     start = monday.astimezone(timezone.utc).strftime(ODOO_FMT)
     end = next_monday.astimezone(timezone.utc).strftime(ODOO_FMT)
     ro = get_client()
@@ -479,18 +512,71 @@ def week_planning(hr_employee_id: int) -> dict:
     return {"week_start": monday.date().isoformat(), "slots": slots}
 
 
-def team_absences() -> dict:
-    """Absences validées de l'équipe (company 5) chevauchant la semaine courante."""
-    monday, next_monday = _week_bounds()
+def team_week(offset: int = 0) -> dict:
+    """Grille équipe (company 5) : par employé, qui travaille / est absent chaque jour."""
+    monday, next_monday = _week_bounds(offset)
+    start_utc = monday.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end_utc = next_monday.astimezone(timezone.utc).strftime(ODOO_FMT)
     week_from = monday.date().isoformat()
     week_to = (next_monday - timedelta(days=1)).date().isoformat()
+    dates = [(monday + timedelta(days=i)).date().isoformat() for i in range(7)]
     ro = get_client()
+
+    employees = ro.execute_kw(
+        "hr.employee", "search_read", [_company_domain()],
+        {"fields": ["name"], "order": "name"},
+    )
+    members = {e["id"]: {"id": e["id"], "name": e["name"], "days": {d: {} for d in dates}}
+               for e in employees}
+
+    slots = ro.execute_kw(
+        "planning.slot", "search_read",
+        [[["start_datetime", ">=", start_utc], ["start_datetime", "<", end_utc]] + _company_domain()],
+        {"fields": ["employee_ids", "start_datetime"]},
+    )
+    for s in slots:
+        day = _parse_odoo_dt(s["start_datetime"]).astimezone(TZ).date().isoformat()
+        for eid in s.get("employee_ids", []):
+            if eid in members and day in members[eid]["days"]:
+                members[eid]["days"][day]["work"] = True
+
     leaves = ro.execute_kw(
         "hr.leave", "search_read",
         [[["employee_company_id", "=", settings.company_id],
           ["state", "in", ["validate", "validate1"]],
           ["request_date_from", "<=", week_to], ["request_date_to", ">=", week_from]]],
-        {"fields": ["employee_id", "work_entry_type_id", "request_date_from", "request_date_to"],
-         "order": "request_date_from asc"},
+        {"fields": ["employee_id", "work_entry_type_id", "request_date_from", "request_date_to"]},
     )
-    return {"week_start": week_from, "absences": leaves}
+    for lv in leaves:
+        eid = lv["employee_id"][0] if lv.get("employee_id") else None
+        if eid not in members:
+            continue
+        icon, _ = _friendly_leave(lv["work_entry_type_id"][1] if lv.get("work_entry_type_id") else None)
+        for d in dates:
+            if lv["request_date_from"] <= d <= lv["request_date_to"]:
+                members[eid]["days"][d]["leave"] = icon
+
+    return {"week_start": week_from, "dates": dates, "members": list(members.values())}
+
+
+def employee_extra(hr_employee_id: int) -> dict:
+    """Données de profil enrichies : avatar, taux d'activité, parcours (CV)."""
+    ro = get_client()
+    rows = ro.execute_kw("hr.employee", "read", [[hr_employee_id]],
+                         {"fields": ["image_256", "resource_calendar_id"]})
+    if not rows:
+        return {}
+    e = rows[0]
+    rate = None
+    if e.get("resource_calendar_id"):
+        cal = ro.execute_kw("resource.calendar", "read", [[e["resource_calendar_id"][0]]],
+                            {"fields": ["hours_per_week", "full_time_required_hours"]})
+        ft = cal[0].get("full_time_required_hours") if cal else None
+        if ft:
+            rate = round(cal[0]["hours_per_week"] / ft * 100)
+    resume = ro.execute_kw(
+        "hr.resume.line", "search_read", [[["employee_id", "=", hr_employee_id]]],
+        {"fields": ["name", "description", "date_start", "line_type_id"],
+         "order": "date_start desc", "limit": 10},
+    )
+    return {"avatar": e.get("image_256") or None, "activity_rate": rate, "resume": resume}

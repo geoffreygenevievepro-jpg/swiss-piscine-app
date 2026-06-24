@@ -122,3 +122,23 @@ input.pin { letter-spacing: .4em; text-align: center; font-size: 1.4rem; }
   min-height: 40px;
 }
 .chip.active { background: var(--aqua-dark); color: var(--white); border-color: var(--aqua-dark); }
+
+/* --- Jauges circulaires (soldes) --- */
+.ring {
+  width: 84px; height: 84px; border-radius: 50%; margin: 0 auto;
+  display: flex; align-items: center; justify-content: center;
+}
+.ring-in {
+  width: 64px; height: 64px; border-radius: 50%; background: var(--white);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.05;
+}
+
+/* --- Badges de statut --- */
+.badge { font-size: .72rem; font-weight: 600; padding: 4px 9px; border-radius: 999px; white-space: nowrap; }
+.badge-ok { background: rgba(47,170,94,.15); color: var(--ok); }
+.badge-pending { background: rgba(224,138,30,.18); color: var(--warn); }
+.badge-danger { background: rgba(208,73,58,.15); color: var(--danger); }
+.badge-grey { background: #eef3f6; color: var(--muted); }
+
+/* --- Boutons de navigation (semaine) --- */
+.btn.nav { width: 46px; min-height: 46px; padding: 0; font-size: 1.3rem; flex: 0 0 auto; }
