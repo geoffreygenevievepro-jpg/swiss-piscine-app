@@ -19,6 +19,15 @@ class NewIntervention(BaseModel):
     photos: list[str] = []                       # images base64 (data URL acceptée)
 
 
+class NewPartner(BaseModel):
+    name: str = Field(..., min_length=2, max_length=120)
+    zip: str | None = None
+    city: str | None = None
+    street: str | None = None
+    phone: str | None = None
+    email: str | None = None
+
+
 class Report(BaseModel):
     type: str = Field(..., min_length=1)
     notes: str | None = None
@@ -27,6 +36,9 @@ class Report(BaseModel):
     hours: float | None = None        # durée en heures (pour le timesheet)
     photos: list[str] = []            # images base64 (data URL acceptée)
     signature: str | None = None      # image base64 (data URL acceptée)
+    parts: list[str] = []             # pièces utilisées (noms de produits)
+    next_action: str | None = None    # rappel | appel | devis | rien
+    next_action_date: str | None = None  # YYYY-MM-DD (échéance de l'activité)
 
 
 @router.get("/interventions/today")
@@ -51,6 +63,8 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
         raise HTTPException(422, "Date ou heure invalide")
     if end_utc <= start_utc:
         raise HTTPException(422, "L'heure de fin doit être après l'heure de début")
+    if odoo.slot_overlaps(emp["hr_employee_id"], start_utc, end_utc):
+        raise HTTPException(409, "Ce créneau chevauche une autre intervention.")
     try:
         slot_id = odoo.create_intervention(
             emp["hr_employee_id"], body.name, start_utc, end_utc,
@@ -68,9 +82,27 @@ def partners(q: str, emp=Depends(get_current_employee)):
     return odoo.search_partners(q.strip())
 
 
+@router.post("/partners", status_code=201)
+def create_partner(body: NewPartner, emp=Depends(get_current_employee)):
+    """Création rapide d'un client (intervention imprévue avec nouveau client)."""
+    try:
+        pid = odoo.create_partner(body.name, body.zip, body.city, body.street, body.phone, body.email)
+    except Exception as e:
+        raise odoo_unavailable(e)
+    return {"id": pid, "name": body.name}
+
+
 @router.get("/report-types")
 def report_types(emp=Depends(get_current_employee)):
     return odoo.REPORT_TYPES
+
+
+@router.get("/products/search")
+def products_search(q: str, emp=Depends(get_current_employee)):
+    """Recherche de pièces/produits pour la checklist du rapport."""
+    if len(q.strip()) < 2:
+        return []
+    return odoo.search_report_products(q.strip())
 
 
 @router.post("/interventions/{slot_id}/report", status_code=201)

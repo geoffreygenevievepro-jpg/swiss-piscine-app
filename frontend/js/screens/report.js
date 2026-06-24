@@ -26,11 +26,11 @@ function downscale(file) {
   });
 }
 
-export async function renderReport(root, slot, onDone) {
+export async function renderReport(root, slot, onDone, opts = {}) {
   let types = [];
   try { types = await api("/report-types"); } catch { types = []; }
 
-  const state = { type: null, photos: [], start: null, end: null, timer: null };
+  const state = { type: null, photos: [], start: null, end: null, timer: null, parts: [], next: "rien" };
 
   root.innerHTML = `
     <button class="btn secondary" id="r-back" style="width:auto;min-height:40px;margin-bottom:14px">‹ Annuler</button>
@@ -59,12 +59,31 @@ export async function renderReport(root, slot, onDone) {
       <input id="r-materials" type="text" placeholder="Ex. 2 sacs de sable, vanne 6 voies…" /></div>
 
     <div class="card">
+      <strong>Pièces utilisées</strong>
+      <div id="r-parts" style="display:flex;flex-wrap:wrap;gap:6px;margin:10px 0"></div>
+      <input id="r-part-search" type="text" autocomplete="off" placeholder="Rechercher une pièce (filtre, chlore…)"
+        style="width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem" />
+      <div id="r-part-results"></div>
+    </div>
+
+    <div class="card">
       <strong>Photos</strong>
       <div id="r-thumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0"></div>
       <label class="btn secondary" style="cursor:pointer">
         📷 Ajouter des photos
         <input id="r-photo-input" type="file" accept="image/*" capture="environment" multiple hidden />
       </label>
+    </div>
+
+    <div class="card">
+      <strong>Prochaine action</strong>
+      <div id="r-next" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+        ${[["rien", "Rien"], ["rappel", "Rappel"], ["appel", "Appel client"], ["devis", "Devis SAV"]].map(([v, l]) => `<button type="button" class="chip ${v === "rien" ? "active" : ""}" data-next="${v}">${l}</button>`).join("")}
+      </div>
+      <div id="r-next-date" style="display:none;margin-top:10px">
+        <label style="font-size:.82rem;color:var(--muted)">Échéance (optionnel)</label>
+        <input id="r-next-when" type="date" style="width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem" />
+      </div>
     </div>
 
     <div class="card">
@@ -89,21 +108,24 @@ export async function renderReport(root, slot, onDone) {
   // --- Timer ---
   const clockEl = root.querySelector("#r-clock");
   const timerBtn = root.querySelector("#r-timer");
-  timerBtn.addEventListener("click", () => {
-    if (!state.start) {
-      state.start = Date.now();
-      timerBtn.textContent = "⏹️ Terminer";
-      timerBtn.style.background = "var(--danger)";
-      state.timer = setInterval(() => {
-        clockEl.textContent = fmtClock(Math.floor((Date.now() - state.start) / 1000));
-      }, 1000);
-    } else if (!state.end) {
-      state.end = Date.now();
-      clearInterval(state.timer); state.timer = null;
-      timerBtn.textContent = "✓ Temps enregistré";
-      timerBtn.disabled = true;
-    }
-  });
+  function startChrono() {
+    if (state.start) return;
+    state.start = Date.now();
+    timerBtn.textContent = "⏹️ Terminer";
+    timerBtn.style.background = "var(--danger)";
+    state.timer = setInterval(() => {
+      clockEl.textContent = fmtClock(Math.floor((Date.now() - state.start) / 1000));
+    }, 1000);
+  }
+  function stopChrono() {
+    if (!state.start || state.end) return;
+    state.end = Date.now();
+    clearInterval(state.timer); state.timer = null;
+    timerBtn.textContent = "✓ Temps enregistré";
+    timerBtn.disabled = true;
+  }
+  timerBtn.addEventListener("click", () => { if (!state.start) startChrono(); else stopChrono(); });
+  if (opts.autoStart) startChrono();  // ouvert via « ▶️ Démarrer l'intervention »
 
   // --- Photos ---
   const thumbs = root.querySelector("#r-thumbs");
@@ -127,6 +149,50 @@ export async function renderReport(root, slot, onDone) {
     b.parentElement.remove();
   });
 
+  // --- Pièces utilisées ---
+  const partsWrap = root.querySelector("#r-parts");
+  const partSearch = root.querySelector("#r-part-search");
+  const partResults = root.querySelector("#r-part-results");
+  function renderParts() {
+    partsWrap.innerHTML = state.parts.map((p, i) =>
+      `<span class="chip active" data-rmpart="${i}" style="cursor:pointer">${escapeHtml(p)} ✕</span>`).join("");
+  }
+  function addPart(name) {
+    name = (name || "").trim();
+    if (!name || state.parts.includes(name)) return;
+    state.parts.push(name); renderParts(); partResults.innerHTML = ""; partSearch.value = "";
+  }
+  partsWrap.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-rmpart]"); if (!b) return;
+    state.parts.splice(Number(b.dataset.rmpart), 1); renderParts();
+  });
+  let partTmr = null;
+  partSearch.addEventListener("input", () => {
+    clearTimeout(partTmr); const q = partSearch.value.trim();
+    if (q.length < 2) { partResults.innerHTML = ""; return; }
+    partTmr = setTimeout(async () => {
+      try {
+        const list = await api(`/products/search?q=${encodeURIComponent(q)}`);
+        partResults.innerHTML = list.map(p => `<div class="card" data-part="${escapeHtml(p.name)}" style="cursor:pointer;padding:8px 10px;margin:6px 0">${escapeHtml(p.name)}</div>`).join("")
+          + `<button type="button" class="btn secondary" id="r-part-add" style="margin:6px 0">➕ Ajouter « ${escapeHtml(q)} »</button>`;
+      } catch { partResults.innerHTML = ""; }
+    }, 300);
+  });
+  partResults.addEventListener("click", (e) => {
+    const d = e.target.closest("[data-part]"); if (d) { addPart(d.dataset.part); return; }
+    if (e.target.closest("#r-part-add")) addPart(partSearch.value);
+  });
+
+  // --- Prochaine action ---
+  const nextWrap = root.querySelector("#r-next");
+  const nextDate = root.querySelector("#r-next-date");
+  nextWrap.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-next]"); if (!b) return;
+    state.next = b.dataset.next;
+    nextWrap.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === b));
+    nextDate.style.display = state.next === "rien" ? "none" : "block";
+  });
+
   // --- Signature ---
   setupSignature(root.querySelector("#r-sign"), state);
   root.querySelector("#r-sign-clear").addEventListener("click", () => {
@@ -143,10 +209,12 @@ export async function renderReport(root, slot, onDone) {
     if (!state.type) { err.textContent = "Choisis un type d'intervention."; return; }
 
     const photos = state.photos.filter(Boolean);
+    if (photos.length < 2) { err.textContent = "Ajoute au moins 2 photos."; return; }
     const signCv = root.querySelector("#r-sign");
     const hours = state.start && state.end ? (state.end - state.start) / 3600000 : null;
     const schedule = state.start && state.end
       ? `${tHM(state.start)} – ${tHM(state.end)}` : null;
+    const nextWhen = root.querySelector("#r-next-when");
 
     const payload = {
       type: state.type,
@@ -156,6 +224,9 @@ export async function renderReport(root, slot, onDone) {
       hours: hours ? Number(hours.toFixed(2)) : null,
       photos,
       signature: state.signed ? signCv.toDataURL("image/png") : null,
+      parts: state.parts,
+      next_action: state.next === "rien" ? null : state.next,
+      next_action_date: (state.next !== "rien" && nextWhen && nextWhen.value) ? nextWhen.value : null,
     };
 
     submit.disabled = true;

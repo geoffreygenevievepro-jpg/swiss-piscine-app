@@ -6,10 +6,10 @@ import { sync as syncOutbox, count as outboxCount } from "./outbox.js";
 import { renderLogin } from "./screens/login.js";
 import { terrain } from "./screens/terrain.js";
 import { pointer } from "./screens/pointer.js";
+import { conges } from "./screens/conges.js";
 import { moi } from "./screens/moi.js";
-import { semaine } from "./screens/semaine.js";
 
-const SCREENS = [terrain, pointer, moi, semaine];
+const SCREENS = [terrain, pointer, conges, moi];
 const root = document.getElementById("app");
 let current = terrain.id;
 

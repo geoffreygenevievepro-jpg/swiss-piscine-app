@@ -242,6 +242,95 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
     }
 
 
+# --- Saisie manuelle / édition des pointages (hr.attendance) ---------------
+# Édition/suppression réservée aux pointages créés depuis moins de 24 h, et
+# uniquement ceux de l'employé courant (cloisonnement).
+
+def attendance_today_detail(hr_employee_id: int, date_iso: str | None = None) -> dict:
+    """Pointages du jour : id, horaires locaux, durée, éditabilité (<24 h)."""
+    ro = get_client()
+    start, end = _day_bounds_utc(date_iso)
+    rows = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start], ["check_in", "<", end]]],
+        {"fields": ["check_in", "check_out", "worked_hours", "create_date"], "order": "check_in asc"},
+    )
+    now = datetime.now(timezone.utc)
+    items, total = [], 0.0
+    for a in rows:
+        ci = _parse_odoo_dt(a["check_in"])
+        co = _parse_odoo_dt(a["check_out"]) if a.get("check_out") else None
+        created = _parse_odoo_dt(a["create_date"]) if a.get("create_date") else ci
+        w = round(a.get("worked_hours") or 0, 2)
+        total += w
+        items.append({
+            "id": a["id"],
+            "in": ci.astimezone(TZ).strftime("%H:%M"),
+            "out": co.astimezone(TZ).strftime("%H:%M") if co else None,
+            "worked": w,
+            "open": co is None,
+            "editable": (now - created) < timedelta(hours=24),
+        })
+    day = date_iso or datetime.now(TZ).date().isoformat()
+    return {"date": day, "attendances": items, "total": round(total, 2)}
+
+
+def attendance_overlaps(hr_employee_id: int, start_utc: str, end_utc: str,
+                        exclude_id: int | None = None) -> bool:
+    """True si un pointage (fermé) de l'employé chevauche [start, end[."""
+    ro = get_client()
+    domain = [["employee_id", "=", hr_employee_id],
+              ["check_in", "<", end_utc], ["check_out", ">", start_utc]]
+    if exclude_id:
+        domain.append(["id", "!=", exclude_id])
+    return bool(ro.execute_kw("hr.attendance", "search_read", [domain], {"fields": ["id"], "limit": 1}))
+
+
+def _attendance_editable(hr_employee_id: int, att_id: int) -> bool | None:
+    """None si introuvable/non possédé ; sinon True/False selon la règle des 24 h."""
+    ro = get_client()
+    rows = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["id", "=", att_id], ["employee_id", "=", hr_employee_id]]],
+        {"fields": ["create_date"], "limit": 1},
+    )
+    if not rows:
+        return None
+    created = _parse_odoo_dt(rows[0]["create_date"]) if rows[0].get("create_date") else None
+    return created is None or (datetime.now(timezone.utc) - created) < timedelta(hours=24)
+
+
+def create_manual_attendance(hr_employee_id: int, start_utc: str, end_utc: str) -> dict:
+    """Crée un pointage manuel (saisie d'heures oubliées). ÉCRITURE."""
+    aid = get_write_client().execute_kw(
+        "hr.attendance", "create",
+        [{"employee_id": hr_employee_id, "check_in": start_utc, "check_out": end_utc}])
+    return {"id": aid}
+
+
+def update_attendance(hr_employee_id: int, att_id: int, start_utc: str, end_utc: str) -> dict:
+    """Modifie un pointage de l'employé (si <24 h). ÉCRITURE."""
+    ed = _attendance_editable(hr_employee_id, att_id)
+    if ed is None:
+        return {"error": "not_found"}
+    if not ed:
+        return {"error": "locked"}
+    get_write_client().execute_kw(
+        "hr.attendance", "write", [[att_id], {"check_in": start_utc, "check_out": end_utc}])
+    return {"ok": True}
+
+
+def delete_attendance(hr_employee_id: int, att_id: int) -> dict:
+    """Supprime un pointage de l'employé (si <24 h). ÉCRITURE."""
+    ed = _attendance_editable(hr_employee_id, att_id)
+    if ed is None:
+        return {"error": "not_found"}
+    if not ed:
+        return {"error": "locked"}
+    get_write_client().execute_kw("hr.attendance", "unlink", [[att_id]])
+    return {"ok": True}
+
+
 # --- Interventions (planning.slot) ----------------------------------------
 # Les interventions sont planifiées dans le module Planning. Le filtrage se fait
 # sur employee_ids (hr.employee), donc fonctionne même pour les employés sans
@@ -311,11 +400,17 @@ def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
     slot = rows[0]
     slot["label"] = _slot_label(slot)
     slot["partner"] = None
+    slot["history"] = []
+    slot["known_issues"] = None
     if slot.get("partner_id"):
+        pid = slot["partner_id"][0]
         prows = client.execute_kw(
-            "res.partner", "read", [[slot["partner_id"][0]]], {"fields": _PARTNER_FIELDS},
+            "res.partner", "read", [[pid]], {"fields": _PARTNER_FIELDS + ["comment"]},
         )
-        slot["partner"] = prows[0] if prows else None
+        if prows:
+            slot["partner"] = prows[0]
+            slot["known_issues"] = _html_to_text(prows[0].get("comment")) or None
+        slot["history"] = client_history(pid)
     return slot
 
 
@@ -355,6 +450,77 @@ def search_partners(query: str, limit: int = 15) -> list[dict]:
     )
 
 
+def create_partner(name: str, zip_code: str | None = None, city: str | None = None,
+                   street: str | None = None, phone: str | None = None,
+                   email: str | None = None) -> int:
+    """Crée un client (res.partner) et renvoie son id. ÉCRITURE — réservée à la
+    création d'une intervention imprévue avec un nouveau client."""
+    vals = {"name": name}
+    if zip_code:
+        vals["zip"] = zip_code
+    if city:
+        vals["city"] = city
+    if street:
+        vals["street"] = street
+    if phone:
+        vals["phone"] = phone
+    if email:
+        vals["email"] = email
+    return get_write_client().execute_kw("res.partner", "create", [vals])
+
+
+# --- Contexte client (historique, problèmes connus) -----------------------
+
+def _html_to_text(html: str | None) -> str:
+    """Convertit un champ HTML Odoo (res.partner.comment) en texte simple."""
+    import re
+    if not html:
+        return ""
+    txt = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    txt = re.sub(r"</p>", "\n", txt, flags=re.IGNORECASE)
+    txt = re.sub(r"<[^>]+>", " ", txt)
+    for a, b in (("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&#39;", "'")):
+        txt = txt.replace(a, b)
+    lines = [" ".join(l.split()) for l in txt.splitlines()]
+    return "\n".join(l for l in lines if l).strip()
+
+
+def client_history(partner_id: int, limit: int = 3) -> list[dict]:
+    """Les dernières tâches Odoo du client (project.task) : date, libellé, étape."""
+    ro = get_client()
+    tasks = ro.execute_kw(
+        "project.task", "search_read",
+        [[["partner_id", "=", partner_id]] + _company_domain()],
+        {"fields": ["name", "stage_id", "create_date", "date_deadline"],
+         "order": "create_date desc", "limit": limit},
+    )
+    out = []
+    for t in tasks:
+        d = (t.get("date_deadline") or t.get("create_date") or "")[:10]
+        out.append({
+            "name": t.get("name"),
+            "date": d,
+            "stage": t["stage_id"][1] if t.get("stage_id") else None,
+        })
+    return out
+
+
+def slot_overlaps(hr_employee_id: int, start_utc: str, end_utc: str,
+                  exclude_id: int | None = None) -> dict | None:
+    """Renvoie un créneau de l'employé qui chevauche [start, end[, sinon None."""
+    ro = get_client()
+    domain = [["employee_ids", "in", [hr_employee_id]],
+              ["start_datetime", "<", end_utc],
+              ["end_datetime", ">", start_utc]] + _company_domain()
+    if exclude_id:
+        domain.append(["id", "!=", exclude_id])
+    rows = ro.execute_kw(
+        "planning.slot", "search_read", [domain],
+        {"fields": ["start_datetime", "end_datetime", "name"], "order": "start_datetime", "limit": 1},
+    )
+    return rows[0] if rows else None
+
+
 # --- Rapport d'intervention -----------------------------------------------
 
 REPORT_TYPES = [
@@ -372,13 +538,22 @@ def _esc(s: str) -> str:
     return (str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+_NEXT_ACTION_LABELS = {
+    "rappel": "Rappel client",
+    "appel": "Appel client",
+    "devis": "Devis SAV à établir",
+}
+
+
 def _build_report_html(report: dict, employee_name: str) -> str:
+    parts = report.get("parts") or []
     rows = [
         ("Type d'intervention", report.get("type")),
         ("Technicien", employee_name),
         ("Horaire", report.get("schedule")),
         ("Durée", f'{report["hours"]:.2f} h' if report.get("hours") else None),
         ("Matériel utilisé", report.get("materials")),
+        ("Pièces utilisées", ", ".join(parts) if parts else None),
     ]
     html = ["<p><strong>📋 Rapport d'intervention</strong></p><ul>"]
     for label, val in rows:
@@ -387,6 +562,11 @@ def _build_report_html(report: dict, employee_name: str) -> str:
     html.append("</ul>")
     if report.get("notes"):
         html.append(f"<p><strong>Notes :</strong><br>{_esc(report['notes'])}</p>")
+    next_action = report.get("next_action")
+    if next_action in _NEXT_ACTION_LABELS:
+        when = report.get("next_action_date")
+        suffix = f" — {_esc(when)}" if when else ""
+        html.append(f"<p><strong>Prochaine action :</strong> {_esc(_NEXT_ACTION_LABELS[next_action])}{suffix}</p>")
     return "".join(html)
 
 
@@ -399,6 +579,60 @@ def _slot_target(slot: dict, slot_id: int) -> tuple[str, int]:
     if slot.get("partner_id"):
         return "res.partner", slot["partner_id"][0]
     return "planning.slot", slot_id
+
+
+# Cache des ids ir.model (requis pour mail.activity.res_model_id).
+_model_id_cache: dict[str, int | None] = {}
+
+
+def _model_id(model: str) -> int | None:
+    if model not in _model_id_cache:
+        ro = get_client()
+        rows = ro.execute_kw("ir.model", "search_read", [[["model", "=", model]]],
+                             {"fields": ["id"], "limit": 1})
+        _model_id_cache[model] = rows[0]["id"] if rows else None
+    return _model_id_cache[model]
+
+
+# next_action → (activity_type_id, résumé, échéance par défaut en jours)
+_ACTIVITY_MAP = {
+    "rappel": (4, "Rappel client", 7),       # To-Do
+    "appel": (2, "Appeler le client", 2),     # Call
+    "devis": (4, "Établir un devis SAV", 1),  # To-Do
+}
+
+
+def _create_next_activity(rw, model: str, rid: int, next_action: str | None,
+                          date_iso: str | None) -> bool:
+    """Planifie une activité Odoo (rappel/appel/devis) sur le record. Best-effort."""
+    if next_action not in _ACTIVITY_MAP:
+        return False
+    if model not in ("project.task", "project.project", "res.partner"):
+        return False  # planning.slot ne porte pas d'activité
+    model_id = _model_id(model)
+    if not model_id:
+        return False
+    type_id, summary, default_days = _ACTIVITY_MAP[next_action]
+    deadline = date_iso or (datetime.now(TZ).date() + timedelta(days=default_days)).isoformat()
+    try:
+        rw.execute_kw("mail.activity", "create", [{
+            "res_model": model, "res_model_id": model_id, "res_id": rid,
+            "activity_type_id": type_id, "summary": summary, "date_deadline": deadline,
+        }])
+        return True
+    except Exception:
+        return False
+
+
+def search_report_products(query: str, limit: int = 20) -> list[dict]:
+    """Recherche de produits/pièces (product.product) pour la checklist du rapport."""
+    ro = get_client()
+    domain = ["|", ["company_id", "=", settings.company_id], ["company_id", "=", False],
+              ["name", "ilike", query]]
+    return ro.execute_kw(
+        "product.product", "search_read", [domain],
+        {"fields": ["name", "default_code"], "limit": limit, "order": "name"},
+    )
 
 
 def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report: dict) -> dict | None:
@@ -452,8 +686,12 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
         except Exception:
             timesheet_ok = False
 
+    # Prochaine action → activité planifiée (best-effort, ne bloque pas le rapport).
+    activity_ok = _create_next_activity(
+        rw, model, rid, report.get("next_action"), report.get("next_action_date"))
+
     return {"ok": True, "model": model, "res_id": rid,
-            "attachments": len(att_ids), "timesheet": timesheet_ok}
+            "attachments": len(att_ids), "timesheet": timesheet_ok, "activity": activity_ok}
 
 
 # --- RH : congés, soldes, fiches de salaire -------------------------------

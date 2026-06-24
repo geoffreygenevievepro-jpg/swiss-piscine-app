@@ -1,9 +1,12 @@
-// Onglet TERRAIN — interventions du jour choisi (défaut aujourd'hui) + détail + création.
+// Onglet « Je fais » — interventions du jour (bascule Jour/Semaine) + détail enrichi
+// (historique client, fiche client, Démarrer→Rapport) + création (avec client rapide).
 import { api } from "../api.js";
 import { escapeHtml, toast } from "../util.js";
 import { renderReport } from "./report.js";
+import { semaine } from "./semaine.js";
 
 let selectedDate = null;  // YYYY-MM-DD ; null = aujourd'hui
+let mode = "jour";        // "jour" | "semaine" (bascule en tête de l'onglet « Je fais »)
 const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; };
 
 function downscale(file) {
@@ -22,18 +25,33 @@ function downscale(file) {
 
 export const terrain = {
   id: "terrain",
-  label: "Terrain",
+  label: "Je fais",
   icon: "🧰",
   async render(root) {
-    const date = selectedDate || todayISO();
-    root.innerHTML = `${dateHeader(date)}<div id="iv-zone"><div class="placeholder"><div class="big">📋</div>Chargement…</div></div>`;
-    bindDate(root);
-    let data;
-    try { data = await api(`/interventions/today?date=${date}`); }
-    catch { root.querySelector("#iv-zone").innerHTML = `<div class="card" style="border-color:var(--danger)">Impossible de charger les interventions.</div>`; return; }
-    renderList(root, data.interventions || []);
+    root.innerHTML = `${modeToggle()}<div id="t-content"></div>`;
+    root.querySelectorAll("[data-mode]").forEach(b =>
+      b.addEventListener("click", () => { mode = b.dataset.mode; terrain.render(root); }));
+    const content = root.querySelector("#t-content");
+    if (mode === "semaine") await semaine.render(content);
+    else await renderJour(root, content);
   },
 };
+
+function modeToggle() {
+  return `<div style="display:flex;gap:8px;margin-bottom:14px">
+    ${["jour", "semaine"].map(m => `<button class="chip ${m === mode ? "active" : ""}" data-mode="${m}" style="flex:1">${m === "jour" ? "Jour" : "Semaine"}</button>`).join("")}
+  </div>`;
+}
+
+async function renderJour(root, content) {
+  const date = selectedDate || todayISO();
+  content.innerHTML = `${dateHeader(date)}<div id="iv-zone"><div class="placeholder"><div class="big">📋</div>Chargement…</div></div>`;
+  bindDate(root);
+  let data;
+  try { data = await api(`/interventions/today?date=${date}`); }
+  catch { content.querySelector("#iv-zone").innerHTML = `<div class="card" style="border-color:var(--danger)">Impossible de charger les interventions.</div>`; return; }
+  renderList(root, data.interventions || []);
+}
 
 function dateHeader(date) {
   const d = new Date(date + "T00:00:00");
@@ -64,6 +82,16 @@ function bindDate(root) {
 
 function hm(dt) { return dt ? dt.slice(11, 16) : ""; }
 
+// Couleur indicative selon le type d'intervention (déduit du libellé).
+function typeColor(label) {
+  const t = (label || "").toLowerCase();
+  if (t.includes("entretien")) return "var(--ok)";
+  if (t.includes("sav")) return "#e08a1e";
+  if (t.includes("dépann") || t.includes("depann")) return "#2f7fd1";
+  if (t.includes("hivernage")) return "#6c5ce7";
+  return "var(--aqua-dark)";
+}
+
 function renderList(root, slots) {
   const zone = root.querySelector("#iv-zone");
   if (!slots.length) { zone.innerHTML = `<div class="placeholder"><div class="big">☀️</div>Aucune intervention ce jour-là.</div>`; return; }
@@ -75,11 +103,11 @@ function renderList(root, slots) {
 
 function slotCard(s) {
   const done = s.state === "1_done";
-  const color = done ? "var(--ok)" : "var(--aqua-dark)";
+  const accent = done ? "var(--ok)" : typeColor(s.label);
   const client = s.partner_id ? s.partner_id[1] : "";
-  return `<div class="card" data-slot="${s.id}" style="cursor:pointer;display:flex;gap:12px;align-items:flex-start">
+  return `<div class="card" data-slot="${s.id}" style="cursor:pointer;display:flex;gap:12px;align-items:flex-start;border-left:4px solid ${accent}">
     <div style="flex:0 0 auto;text-align:center;min-width:48px">
-      <div style="font-weight:700;color:${color}">${hm(s.start_datetime)}</div>
+      <div style="font-weight:700;color:${accent}">${hm(s.start_datetime)}</div>
       <div style="font-size:.72rem;color:var(--muted)">${hm(s.end_datetime)}</div></div>
     <div style="flex:1;min-width:0"><strong>${escapeHtml(s.label)}</strong>
       ${client ? `<div style="color:var(--muted);font-size:.88rem;margin-top:2px">${escapeHtml(client)}</div>` : ""}
@@ -97,19 +125,38 @@ async function renderDetail(root, slotId) {
   const addr = [pn.street, pn.street2, [pn.zip, pn.city].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   const tel = pn.phone;
   const maps = addr ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr)}` : null;
+  const accent = s.state === "1_done" ? "var(--ok)" : typeColor(s.label);
+  const historyCard = (s.history && s.history.length) ? `
+    <div class="card"><strong>Historique client</strong>
+      ${s.history.map(h => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line)">
+        <span style="min-width:0">${escapeHtml(h.name || "—")}</span>
+        <span style="color:var(--muted);font-size:.82rem;white-space:nowrap">${escapeHtml(h.date || "")}${h.stage ? " · " + escapeHtml(h.stage) : ""}</span>
+      </div>`).join("")}
+    </div>` : "";
+  const ficheCard = s.known_issues ? `
+    <details class="card"><summary style="cursor:pointer;font-weight:700">📋 Fiche client</summary>
+      <p style="white-space:pre-line;color:var(--muted);font-size:.86rem;margin:10px 0 0">${escapeHtml(s.known_issues)}</p>
+    </details>` : "";
+
   root.innerHTML = `
     <button class="btn secondary" id="back" style="width:auto;min-height:40px;margin-bottom:14px">‹ Retour</button>
-    <h2 style="margin-top:0">${escapeHtml(s.label)}</h2>
+    <h2 style="margin-top:0;border-left:4px solid ${accent};padding-left:10px">${escapeHtml(s.label)}</h2>
     <div class="card"><strong>Horaire</strong><p style="color:var(--muted);margin:.3rem 0 0">${hm(s.start_datetime)} – ${hm(s.end_datetime)}</p></div>
     ${s.partner_id ? `<div class="card"><strong>${escapeHtml(pn.name || s.partner_id[1])}</strong>${addr ? `<p style="color:var(--muted);margin:.4rem 0 0">${escapeHtml(addr)}</p>` : ""}</div>
     <div style="display:flex;gap:10px">
       ${tel ? `<a class="btn" href="tel:${escapeHtml(tel)}" style="text-decoration:none">📞 Appeler</a>` : ""}
       ${maps ? `<a class="btn secondary" href="${maps}" target="_blank" rel="noopener" style="text-decoration:none">🗺️ Itinéraire</a>` : ""}
     </div>` : ""}
-    <button class="btn" id="do-report" style="margin-top:16px">📝 Faire le rapport</button>`;
+    ${ficheCard}
+    ${historyCard}
+    <button class="btn" id="do-start" style="margin-top:16px">▶️ Démarrer l'intervention</button>
+    <button class="btn secondary" id="do-report" style="margin-top:8px">📝 Rapport (sans chrono)</button>`;
   root.querySelector("#back").addEventListener("click", () => terrain.render(root));
+  const back = (msg) => { terrain.render(root); if (msg) toast(msg); };
+  root.querySelector("#do-start").addEventListener("click", () =>
+    renderReport(root, { id: slotId, label: s.label }, back, { autoStart: true }));
   root.querySelector("#do-report").addEventListener("click", () =>
-    renderReport(root, { id: slotId, label: s.label }, (msg) => { terrain.render(root); if (msg) toast(msg); }));
+    renderReport(root, { id: slotId, label: s.label }, back));
 }
 
 async function renderForm(root) {
@@ -154,11 +201,24 @@ async function renderForm(root) {
     tmr = setTimeout(async () => {
       try {
         const list = await api(`/partners/search?q=${encodeURIComponent(q)}`);
-        results.innerHTML = list.map(pp => `<div class="card" data-pid="${pp.id}" style="cursor:pointer;padding:10px;margin:6px 0"><strong>${escapeHtml(pp.name)}</strong><span style="color:var(--muted);font-size:.8rem"> ${escapeHtml(pp.city || "")}</span></div>`).join("");
+        const items = list.map(pp => `<div class="card" data-pid="${pp.id}" style="cursor:pointer;padding:10px;margin:6px 0"><strong>${escapeHtml(pp.name)}</strong><span style="color:var(--muted);font-size:.8rem"> ${escapeHtml(pp.city || "")}</span></div>`).join("");
+        results.innerHTML = items + `<button type="button" class="btn secondary" id="iv-newclient" style="margin:6px 0">➕ Créer « ${escapeHtml(q)} »</button>`;
       } catch { results.innerHTML = ""; }
     }, 300);
   });
-  results.addEventListener("click", (e) => { const c = e.target.closest("[data-pid]"); if (!c) return; pid.value = c.dataset.pid; ci.value = c.querySelector("strong").textContent; results.innerHTML = ""; });
+  results.addEventListener("click", async (e) => {
+    const c = e.target.closest("[data-pid]");
+    if (c) { pid.value = c.dataset.pid; ci.value = c.querySelector("strong").textContent; results.innerHTML = ""; return; }
+    const nb = e.target.closest("#iv-newclient");
+    if (nb) {
+      const name = ci.value.trim(); if (name.length < 2) return;
+      nb.disabled = true; nb.innerHTML = `<span class="spinner"></span>`;
+      try {
+        const r = await api("/partners", { method: "POST", body: { name } });
+        pid.value = r.id; ci.value = r.name; results.innerHTML = ""; toast("Client créé ✓");
+      } catch { nb.disabled = false; nb.textContent = "➕ Réessayer"; }
+    }
+  });
 
   // Photos
   const thumbs = root.querySelector("#iv-thumbs");
@@ -187,6 +247,6 @@ async function renderForm(root) {
     };
     submit.disabled = true; submit.innerHTML = `<span class="spinner"></span>`;
     try { await api("/interventions", { method: "POST", body }); selectedDate = body.date; terrain.render(root); toast("Intervention créée ✓"); }
-    catch { submit.disabled = false; submit.textContent = "Créer l'intervention"; err.textContent = "Échec de la création."; }
+    catch (e) { submit.disabled = false; submit.textContent = "Créer l'intervention"; err.textContent = (e && e.message) ? e.message : "Échec de la création."; }
   });
 }

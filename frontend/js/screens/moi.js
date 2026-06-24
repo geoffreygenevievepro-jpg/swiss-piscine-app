@@ -1,5 +1,5 @@
 // Onglet MOI — profil, validation manager, fiches de salaire, parcours.
-// (Les soldes et congés sont dans l'onglet « Mes heures ».)
+// (Les soldes et congés sont dans l'onglet « Mes congés ».)
 import { api } from "../api.js";
 import { profile } from "../store.js";
 import { escapeHtml, toast } from "../util.js";

@@ -1,5 +1,5 @@
-// Onglet « Mes heures » (ex-Pointer) — timbrage + résumé heures (jour/semaine/mois,
-// façon Tipee : demi-jauges + tableau) + soldes + mes congés.
+// Onglet « Mes heures » — timbrage + résumé heures (jour/semaine/mois,
+// façon Tipee : demi-jauges + tableau). Les congés sont dans l'onglet « Mes congés ».
 import { api } from "../api.js";
 import { fmtClock, escapeHtml, toast } from "../util.js";
 
@@ -28,18 +28,19 @@ export const pointer = {
   async render(root) {
     clearTimer();
     root.innerHTML = `<h2>Mes heures</h2><div class="placeholder"><div class="big">🕐</div>Chargement…</div>`;
-    let status, summary, balances, leaves;
+    let status, summary, balances, today;
     try {
-      [status, summary, balances, leaves] = await Promise.all([
+      [status, summary, balances, today] = await Promise.all([
         api("/attendance/status"),
         api(`/attendance/summary?period=${period}&offset=${offset}`),
-        api("/rh/balances"), api("/rh/leaves"),
+        api("/rh/balances"),
+        api("/attendance/today"),
       ]);
     } catch {
       root.innerHTML = `<h2>Mes heures</h2><div class="card" style="border-color:var(--danger)">Impossible de joindre le serveur.</div>`;
       return;
     }
-    draw(root, status, summary, balances, leaves);
+    draw(root, status, summary, balances, today);
   },
 };
 
@@ -83,7 +84,7 @@ function summaryTable(buckets) {
     <tbody>${rows}</tbody></table></div>`;
 }
 
-function draw(root, status, summary, balances, leaves) {
+function draw(root, status, summary, balances, today) {
   clearTimer();
   const isIn = status.state === "in";
   const openStart = isIn ? new Date(status.open_since).getTime() : null;
@@ -129,10 +130,10 @@ function draw(root, status, summary, balances, leaves) {
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <strong>Mes congés</strong>
-        <button class="btn" id="ask-leave" style="width:auto;min-height:38px;padding:0 14px">＋ Demander</button>
+        <strong>Pointages d'aujourd'hui</strong>
+        <button class="btn" id="add-att" style="width:auto;min-height:38px;padding:0 14px">＋ Saisie</button>
       </div>
-      <div style="margin-top:10px">${leaveList(leaves)}</div>
+      <div id="att-list" style="margin-top:10px">${attList(today)}</div>
     </div>`;
 
   // Timbrage
@@ -163,56 +164,69 @@ function draw(root, status, summary, balances, leaves) {
   root.querySelectorAll("[data-period]").forEach(b =>
     b.addEventListener("click", () => { period = b.dataset.period; offset = 0; pointer.render(root); }));
 
-  // Congés
-  root.querySelector("#ask-leave").addEventListener("click", () => renderLeaveForm(root));
+  // Pointages du jour : saisie / édition / suppression
+  root.querySelector("#add-att").addEventListener("click", () => renderManualForm(root, today.date));
+  root.querySelector("#att-list").addEventListener("click", async (e) => {
+    const ed = e.target.closest("[data-edit]");
+    if (ed) { const a = today.attendances.find(x => x.id === Number(ed.dataset.edit)); renderManualForm(root, today.date, a); return; }
+    const del = e.target.closest("[data-del]");
+    if (del) {
+      if (!confirm("Supprimer ce pointage ?")) return;
+      try { await api(`/attendance/${del.dataset.del}`, { method: "DELETE" }); toast("Pointage supprimé"); pointer.render(root); }
+      catch (e2) { toast(e2 && e2.message ? e2.message : "Suppression impossible"); }
+    }
+  });
 }
 
-const LEAVE_STATE = {
-  draft: ["Brouillon", "grey"], confirm: ["À valider", "pending"], validate1: ["1re validation", "pending"],
-  validate: ["Validé", "ok"], refuse: ["Refusé", "danger"], cancel: ["Annulé", "grey"],
-};
-function leaveList(leaves) {
-  if (!leaves.length) return `<p style="color:var(--muted);margin:0">Aucune demande de congé.</p>`;
-  return leaves.map(l => {
-    const [lbl, cls] = LEAVE_STATE[l.state] || [l.state, "grey"];
-    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--line)">
-      <div style="min-width:0"><strong>${l.icon || "🗓️"} ${escapeHtml(l.type_label || "Congé")}</strong>
-        <div style="font-size:.82rem;color:var(--muted)">${l.request_date_from} → ${l.request_date_to} · ${l.number_of_days} j</div></div>
-      <span class="badge badge-${cls}">${escapeHtml(lbl)}</span></div>`;
-  }).join("");
+function attList(today) {
+  if (!today.attendances.length) return `<p style="color:var(--muted);margin:0">Aucun pointage aujourd'hui.</p>`;
+  return today.attendances.map(a => `
+    <div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--line)">
+      <div style="flex:1;min-width:0">
+        <strong>${a.in} → ${a.out || "…"}</strong>
+        <span style="color:var(--muted);font-size:.82rem"> · ${fmtH(a.worked)}</span>
+        ${a.open ? `<span style="color:var(--aqua-dark);font-size:.74rem"> · en cours</span>` : ""}
+      </div>
+      ${a.editable && !a.open ? `
+        <button data-edit="${a.id}" aria-label="Modifier" style="border:0;background:none;cursor:pointer;font-size:1.1rem">✎</button>
+        <button data-del="${a.id}" aria-label="Supprimer" style="border:0;background:none;cursor:pointer;font-size:1.05rem">🗑️</button>` : ""}
+    </div>`).join("");
 }
 
-async function renderLeaveForm(root) {
+async function renderManualForm(root, date, att) {
   const back = () => pointer.render(root);
-  let types = [];
-  try { types = await api("/rh/leave-types"); } catch {}
   const n = new Date();
-  const iso = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  const todayIso = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  const d = date || todayIso;
+  const ci = att ? att.in : "08:00";
+  const co = att ? att.out : "12:00";
   root.innerHTML = `
     <button class="btn secondary" id="back" style="width:auto;min-height:40px;margin-bottom:14px">‹ Retour</button>
-    <h2 style="margin-top:0">Demander un congé</h2>
-    <form id="leave-form">
-      <p class="form-error" id="leave-error"></p>
-      <div class="field"><label>Type</label>
-        <select id="l-type" style="width:100%;min-height:52px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem;background:#fbfdfe">
-          ${types.map(t => `<option value="${t.id}">${t.icon} ${escapeHtml(t.label)}${t.remaining ? ` (${t.remaining} restant)` : ""}</option>`).join("")}
-        </select></div>
+    <h2 style="margin-top:0">${att ? "Modifier le pointage" : "Saisie manuelle"}</h2>
+    <form id="att-form">
+      <p class="form-error" id="att-error"></p>
+      <div class="field"><label>Date</label><input id="a-date" type="date" value="${d}" required></div>
       <div style="display:flex;gap:10px">
-        <div class="field" style="flex:1"><label>Du</label><input id="l-from" type="date" value="${iso}" required /></div>
-        <div class="field" style="flex:1"><label>Au</label><input id="l-to" type="date" value="${iso}" required /></div>
+        <div class="field" style="flex:1"><label>Du</label><input id="a-in" type="time" value="${ci}" required></div>
+        <div class="field" style="flex:1"><label>Au</label><input id="a-out" type="time" value="${co}" required></div>
       </div>
-      <div class="field"><label>Motif (optionnel)</label><input id="l-name" type="text" placeholder="Ex. vacances d'été" /></div>
-      <button class="btn" type="submit" id="l-submit">Envoyer la demande</button>
+      <button class="btn" type="submit" id="a-submit">${att ? "Enregistrer" : "Ajouter le pointage"}</button>
     </form>`;
   root.querySelector("#back").addEventListener("click", back);
-  const form = root.querySelector("#leave-form"), err = root.querySelector("#leave-error"), submit = root.querySelector("#l-submit");
+  const form = root.querySelector("#att-form"), err = root.querySelector("#att-error"), submit = root.querySelector("#a-submit");
   form.addEventListener("submit", async (e) => {
     e.preventDefault(); err.textContent = "";
-    const body = { type_id: Number(form.querySelector("#l-type").value), date_from: form.querySelector("#l-from").value, date_to: form.querySelector("#l-to").value, name: form.querySelector("#l-name").value.trim() };
-    if (!body.type_id || !body.date_from || !body.date_to) { err.textContent = "Type et dates obligatoires."; return; }
-    if (body.date_to < body.date_from) { err.textContent = "La date de fin doit être après le début."; return; }
+    const body = { date: form.querySelector("#a-date").value, check_in: form.querySelector("#a-in").value, check_out: form.querySelector("#a-out").value };
+    if (!body.date || !body.check_in || !body.check_out) { err.textContent = "Date et heures obligatoires."; return; }
+    if (body.check_out <= body.check_in) { err.textContent = "L'heure de fin doit être après le début."; return; }
     submit.disabled = true; submit.innerHTML = `<span class="spinner"></span>`;
-    try { await api("/rh/leaves", { method: "POST", body }); back(); toast("Demande envoyée ✓"); }
-    catch { submit.disabled = false; submit.textContent = "Envoyer la demande"; err.textContent = "Échec de l'envoi."; }
+    try {
+      if (att) await api(`/attendance/${att.id}`, { method: "PATCH", body });
+      else await api("/attendance/manual", { method: "POST", body });
+      back(); toast(att ? "Pointage modifié ✓" : "Pointage ajouté ✓");
+    } catch (e2) {
+      submit.disabled = false; submit.textContent = att ? "Enregistrer" : "Ajouter le pointage";
+      err.textContent = e2 && e2.message ? e2.message : "Échec.";
+    }
   });
 }
