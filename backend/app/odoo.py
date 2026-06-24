@@ -351,3 +351,102 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
 
     return {"ok": True, "model": model, "res_id": rid,
             "attachments": len(att_ids), "timesheet": timesheet_ok}
+
+
+# --- RH : congés, soldes, fiches de salaire -------------------------------
+# Odoo 19 : le "type de congé" est un hr.work.entry.type (filtrés par
+# leave_validation_type) ; les soldes via virtual_remaining_leaves (contexte
+# employé). hr.leave = la demande ; net_wage sur hr.payslip.
+
+def leave_balances(hr_employee_id: int) -> dict:
+    """Soldes : congés restants par type (avec solde) + heures supplémentaires."""
+    ro = get_client()
+    types = ro.execute_kw(
+        "hr.work.entry.type", "search_read",
+        [[["leave_validation_type", "!=", False]]],
+        {"fields": ["name", "virtual_remaining_leaves", "request_unit"],
+         "context": {"employee_id": hr_employee_id}},
+    )
+    leaves = [
+        {"name": t["name"], "remaining": t.get("virtual_remaining_leaves") or 0.0,
+         "unit": t.get("request_unit")}
+        for t in types if t.get("virtual_remaining_leaves")
+    ]
+    leaves.sort(key=lambda x: -x["remaining"])
+    emp = ro.execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["total_overtime"]})
+    return {"leaves": leaves, "overtime_hours": emp[0]["total_overtime"] if emp else 0.0}
+
+
+def leave_types(hr_employee_id: int) -> list[dict]:
+    """Types de congé sélectionnables pour une demande (reflète la config Odoo)."""
+    ro = get_client()
+    types = ro.execute_kw(
+        "hr.work.entry.type", "search_read",
+        [[["leave_validation_type", "!=", False]]],
+        {"fields": ["name", "request_unit", "virtual_remaining_leaves"],
+         "context": {"employee_id": hr_employee_id}},
+    )
+    # Dédoublonnage par nom (la config Odoo a des types en double) + solde d'abord.
+    by_name: dict[str, dict] = {}
+    for t in types:
+        if t["name"] not in by_name or (t.get("virtual_remaining_leaves") or 0) > (by_name[t["name"]].get("virtual_remaining_leaves") or 0):
+            by_name[t["name"]] = t
+    uniq = sorted(by_name.values(),
+                  key=lambda t: (-(t.get("virtual_remaining_leaves") or 0.0), t["name"]))
+    return [{"id": t["id"], "name": t["name"], "remaining": t.get("virtual_remaining_leaves") or 0.0}
+            for t in uniq]
+
+
+def my_leaves(hr_employee_id: int) -> list[dict]:
+    """Mes demandes de congé (les plus récentes)."""
+    ro = get_client()
+    return ro.execute_kw(
+        "hr.leave", "search_read", [[["employee_id", "=", hr_employee_id]]],
+        {"fields": ["work_entry_type_id", "request_date_from", "request_date_to",
+                    "number_of_days", "state", "name"],
+         "order": "request_date_from desc", "limit": 20},
+    )
+
+
+def create_leave(hr_employee_id: int, type_id: int, date_from: str, date_to: str, name: str) -> int:
+    """Crée une demande de congé (hr.leave) pour l'employé (à valider par le bureau)."""
+    vals = {
+        "employee_id": hr_employee_id,
+        "work_entry_type_id": type_id,
+        "request_date_from": date_from,
+        "request_date_to": date_to,
+    }
+    if name:
+        vals["name"] = name
+    return get_write_client().execute_kw("hr.leave", "create", [vals])
+
+
+def my_payslips(hr_employee_id: int) -> list[dict]:
+    """Mes fiches de salaire."""
+    ro = get_client()
+    return ro.execute_kw(
+        "hr.payslip", "search_read", [[["employee_id", "=", hr_employee_id]]],
+        {"fields": ["name", "date_from", "date_to", "state", "net_wage"],
+         "order": "date_from desc", "limit": 24},
+    )
+
+
+def payslip_pdf(hr_employee_id: int, payslip_id: int) -> dict | None:
+    """PDF d'une fiche de salaire (depuis la pièce jointe Odoo). None si non autorisé."""
+    ro = get_client()
+    owned = ro.execute_kw(
+        "hr.payslip", "search_read",
+        [[["id", "=", payslip_id], ["employee_id", "=", hr_employee_id]]],
+        {"fields": ["name"], "limit": 1},
+    )
+    if not owned:
+        return None
+    att = ro.execute_kw(
+        "ir.attachment", "search_read",
+        [[["res_model", "=", "hr.payslip"], ["res_id", "=", payslip_id],
+          ["mimetype", "=", "application/pdf"]]],
+        {"fields": ["name", "datas"], "order": "create_date desc", "limit": 1},
+    )
+    if not att:
+        return {"available": False}
+    return {"available": True, "name": att[0]["name"], "datas": att[0]["datas"]}

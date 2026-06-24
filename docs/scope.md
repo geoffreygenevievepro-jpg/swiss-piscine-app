@@ -45,10 +45,17 @@ Tous les modules nécessaires sont **déjà installés** (Odoo Enterprise, véri
 |---|---|---|---|
 | Timbrage entrée/sortie | `hr.attendance` | `employee_id`, `check_in`, `check_out` | écriture |
 | Pointage projet (rentabilité) | `account.analytic.line` (timesheet) | `task_id`, `unit_amount`, `employee_id` | écriture |
-| Demande congé / maladie | `hr.leave` | `holiday_status_id`, `date_from`, `date_to` | écriture |
-| Solde de congés | `hr.leave.allocation` + soldes calculés | `number_of_days` | lecture |
-| Fiche de salaire | `hr.payslip` (+ PDF `ir.attachment`) | `payslip_run_id`, PDF | lecture |
-| Certifications / compétences | `hr.skill`, `hr.resume.line` | — | lecture |
+| Demande congé / maladie | `hr.leave` | `work_entry_type_id`, `request_date_from/to` | écriture |
+| Solde de congés | `hr.work.entry.type` (`virtual_remaining_leaves`, contexte employé) | — | lecture |
+| Fiche de salaire | `hr.payslip` (+ PDF en `ir.attachment`) | `net_wage`, `date_from/to`, PDF | lecture |
+| Certifications / compétences | `hr.resume.line` / `hr.employee.skill` (peu rempli) | — | lecture |
+
+> **RH — noms Odoo 19 (validé le 24/06)** : le "type de congé" n'est plus `hr.leave.type`
+> (supprimé) mais `hr.work.entry.type` (filtré sur `leave_validation_type`, dédoublonné par nom —
+> la config a des doublons et des types custom : Déménagement, Récup. heures…). Soldes via
+> `virtual_remaining_leaves` en contexte employé. Paie : `net_wage` ; le PDF est déjà stocké en
+> pièce jointe (`ir.attachment` mimetype pdf) → téléchargeable directement. La demande de congé
+> crée un `hr.leave` (état à valider par le bureau = 1 validateur).
 | Planning de la semaine | `planning.slot` | `start_datetime`, `employee_ids` | lecture |
 | Interventions du jour | `planning.slot` | `employee_ids`, `start_datetime`, `partner_id`, `project_id` | lecture / création |
 | Rapport d'intervention | `planning.slot` (+ `project.task`) + `ir.attachment` (photos) | worksheet, notes, signature | écriture |
