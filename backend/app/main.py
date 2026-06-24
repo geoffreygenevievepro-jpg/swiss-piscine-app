@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .config import settings
-from .routers import attendance, auth, interventions, me, rh, week
+from .routers import attendance, auth, interventions, manager, me, rh, week
 
 
 @asynccontextmanager
@@ -37,3 +37,4 @@ app.include_router(attendance.router)
 app.include_router(interventions.router)
 app.include_router(rh.router)
 app.include_router(week.router)
+app.include_router(manager.router)

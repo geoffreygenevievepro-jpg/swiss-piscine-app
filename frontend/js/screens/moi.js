@@ -27,18 +27,40 @@ export const moi = {
     root.querySelector("#logout-btn").addEventListener("click", _ctx.logout);
 
     const zone = root.querySelector("#rh-zone");
-    let balances, leaves, payslips;
+    let balances, leaves, payslips, pending = [];
     try {
       [balances, leaves, payslips] = await Promise.all([
         api("/rh/balances"), api("/rh/leaves"), api("/rh/payslips"),
       ]);
+      if (p.role === "manager") {
+        try { pending = await api("/manager/leaves"); } catch {}
+      }
     } catch {
       zone.innerHTML = `<div class="card" style="border-color:var(--danger)">Impossible de charger tes données RH.</div>`;
       return;
     }
-    renderRH(root, zone, balances, leaves, payslips, p);
+    renderRH(root, zone, balances, leaves, payslips, p, pending);
   },
 };
+
+function managerCard(pending) {
+  if (!pending || !pending.length) return "";
+  const rows = pending.map(l => `
+    <div style="padding:10px 0;border-top:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between">
+        <strong>${escapeHtml(l.who)}</strong>
+        <span style="font-size:.8rem;color:var(--muted)">${l.number_of_days} j</span>
+      </div>
+      <div style="font-size:.84rem;color:var(--muted);margin:2px 0 8px">${l.icon} ${escapeHtml(l.type_label)} · ${l.request_date_from} → ${l.request_date_to}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn" data-act="approve" data-id="${l.id}" style="min-height:38px;padding:0 14px">✓ Approuver</button>
+        <button class="btn secondary" data-act="refuse" data-id="${l.id}" style="min-height:38px;padding:0 14px;width:auto">Refuser</button>
+      </div>
+    </div>`).join("");
+  return `<div class="card" style="border-color:var(--warn)">
+    <strong>📥 À valider (${pending.length})</strong>
+    <div style="margin-top:4px">${rows}</div></div>`;
+}
 
 function profileHeader(p) {
   const odoo = p.odoo || {};
@@ -58,8 +80,9 @@ function profileHeader(p) {
     </div>`;
 }
 
-function renderRH(root, zone, balances, leaves, payslips, p) {
+function renderRH(root, zone, balances, leaves, payslips, p, pending) {
   zone.innerHTML = `
+    ${managerCard(pending)}
     ${balanceGauges(balances)}
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -78,6 +101,17 @@ function renderRH(root, zone, balances, leaves, payslips, p) {
   root.querySelector("#payslip-list").addEventListener("click", (e) => {
     const b = e.target.closest("[data-payslip]");
     if (b) downloadPayslip(Number(b.dataset.payslip), b.dataset.name);
+  });
+  // Validation manager (approuver / refuser un congé).
+  zone.addEventListener("click", async (e) => {
+    const b = e.target.closest("[data-act]");
+    if (!b) return;
+    b.disabled = true;
+    try {
+      await api(`/manager/leaves/${b.dataset.id}/${b.dataset.act}`, { method: "POST" });
+      toast(b.dataset.act === "approve" ? "Congé approuvé ✓" : "Congé refusé");
+      moi.render(root, _ctx);
+    } catch { b.disabled = false; toast("Action impossible."); }
   });
 }
 

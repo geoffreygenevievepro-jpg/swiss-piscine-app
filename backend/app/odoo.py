@@ -123,39 +123,50 @@ def attendance_status(hr_employee_id: int) -> dict:
     now = datetime.now(timezone.utc)
     today_seconds = 0
     open_since = None
+    segments = []
     for e in entries:
         ci = _parse_odoo_dt(e["check_in"])
+        ci_local = ci.astimezone(TZ).strftime("%H:%M")
         if e["check_out"]:
-            today_seconds += (_parse_odoo_dt(e["check_out"]) - ci).total_seconds()
+            co = _parse_odoo_dt(e["check_out"])
+            today_seconds += (co - ci).total_seconds()
+            segments.append({"in": ci_local, "out": co.astimezone(TZ).strftime("%H:%M")})
         else:
             today_seconds += (now - ci).total_seconds()
             open_since = ci.isoformat()
+            segments.append({"in": ci_local, "out": None})
     return {
         "state": "in" if open_since else "out",
         "open_since": open_since,
         "today_seconds": int(today_seconds),
         "count": len(entries),
+        "segments": segments,
     }
 
 
-def check_in(hr_employee_id: int) -> dict:
-    """Pointe l'entrée. Idempotent : si déjà entré, renvoie l'état courant."""
+def _geo(vals: dict, lat, lng, prefix: str) -> None:
+    if lat is not None and lng is not None:
+        vals[f"{prefix}_latitude"] = lat
+        vals[f"{prefix}_longitude"] = lng
+
+
+def check_in(hr_employee_id: int, lat=None, lng=None) -> dict:
+    """Pointe l'entrée (avec géoloc optionnelle). Idempotent si déjà entré."""
     if _open_attendance(hr_employee_id):
         return attendance_status(hr_employee_id)
-    get_write_client().execute_kw(
-        "hr.attendance", "create",
-        [{"employee_id": hr_employee_id, "check_in": _odoo_now()}],
-    )
+    vals = {"employee_id": hr_employee_id, "check_in": _odoo_now()}
+    _geo(vals, lat, lng, "in")
+    get_write_client().execute_kw("hr.attendance", "create", [vals])
     return attendance_status(hr_employee_id)
 
 
-def check_out(hr_employee_id: int) -> dict:
-    """Pointe la sortie de la session ouverte. Idempotent si déjà sorti."""
+def check_out(hr_employee_id: int, lat=None, lng=None) -> dict:
+    """Pointe la sortie de la session ouverte (avec géoloc optionnelle)."""
     open_att = _open_attendance(hr_employee_id)
     if open_att:
-        get_write_client().execute_kw(
-            "hr.attendance", "write", [[open_att["id"]], {"check_out": _odoo_now()}],
-        )
+        vals = {"check_out": _odoo_now()}
+        _geo(vals, lat, lng, "out")
+        get_write_client().execute_kw("hr.attendance", "write", [[open_att["id"]], vals])
     return attendance_status(hr_employee_id)
 
 
@@ -362,6 +373,7 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
 # Seuls les types listés ici sont proposés/affichés — config curée, inspirée de Tipee.
 _LEAVE_LABELS = {
     "Paid Time Off": ("🌴", "Vacances"),
+    "Paid Time Off (Switzerland)": ("🌴", "Vacances"),
     "Salary in case of Illness": ("🤒", "Maladie"),
     "Salary in case of Accident": ("🤕", "Accident"),
     "Salary in case of Maternity / Paternity Leave": ("👶", "Maternité / Paternité"),
@@ -580,3 +592,30 @@ def employee_extra(hr_employee_id: int) -> dict:
          "order": "date_start desc", "limit": 10},
     )
     return {"avatar": e.get("image_256") or None, "activity_rate": rate, "resume": resume}
+
+
+# --- Manager : validation des congés ---------------------------------------
+
+def pending_leaves() -> list[dict]:
+    """Demandes de congé en attente de validation (équipe company 5)."""
+    ro = get_client()
+    leaves = ro.execute_kw(
+        "hr.leave", "search_read",
+        [[["employee_company_id", "=", settings.company_id], ["state", "in", ["confirm", "validate1"]]]],
+        {"fields": ["employee_id", "work_entry_type_id", "request_date_from",
+                    "request_date_to", "number_of_days", "name", "state"],
+         "order": "request_date_from asc"},
+    )
+    for l in leaves:
+        name = l["work_entry_type_id"][1] if l.get("work_entry_type_id") else None
+        l["icon"], l["type_label"] = _friendly_leave(name)
+        l["who"] = l["employee_id"][1] if l.get("employee_id") else "—"
+    return leaves
+
+
+def approve_leave(leave_id: int) -> None:
+    get_write_client().execute_kw("hr.leave", "action_approve", [[leave_id]])
+
+
+def refuse_leave(leave_id: int) -> None:
+    get_write_client().execute_kw("hr.leave", "action_refuse", [[leave_id]])
