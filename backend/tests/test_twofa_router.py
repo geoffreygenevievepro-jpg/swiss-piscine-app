@@ -6,6 +6,7 @@ import app.odoo as odoo
 import app.twofa as twofa
 from app.main import app
 from app.deps import get_pre2fa_employee
+from app.security import create_pre2fa_token
 
 client = TestClient(app)
 
@@ -39,3 +40,26 @@ def test_email_setup_requires_email(tmp_path, monkeypatch):
     _setup(tmp_path, monkeypatch, work_email="")  # pas d'email
     r = client.post("/2fa/setup/email/start")
     assert r.status_code == 400
+
+def test_verify_brute_force_lockout(tmp_path, monkeypatch):
+    """I1 — 5 échecs de /2fa/verify → 6e tentative renvoie 429."""
+    monkeypatch.setattr(db.settings, "db_path", str(tmp_path / "t.db"))
+    db.init_db()
+    db.upsert_employee(1, "alex", "Alex", "tech", "h")
+    emp = db.get_employee_by_login("alex")
+    # Activer TOTP avec un secret réel
+    secret = twofa.new_secret()
+    db.set_twofa(emp["id"], "totp", twofa.encrypt(secret))
+    # Ne pas override get_pre2fa_employee : on veut des lectures fraîches du DB
+    app.dependency_overrides.clear()
+    token = create_pre2fa_token(emp["id"])
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # 5 tentatives avec un code invalide
+    for _ in range(5):
+        r = client.post("/2fa/verify", json={"code": "000000"}, headers=headers)
+        assert r.status_code == 400, f"Expected 400, got {r.status_code}"
+
+    # 6e tentative → verrou 429
+    r = client.post("/2fa/verify", json={"code": "000000"}, headers=headers)
+    assert r.status_code == 429, f"Expected 429 after lockout, got {r.status_code}: {r.text}"

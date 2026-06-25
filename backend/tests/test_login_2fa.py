@@ -32,3 +32,14 @@ def test_login_trusted_device_skips_2fa(tmp_path, monkeypatch):
                           (datetime.now(timezone.utc) + timedelta(days=30)).isoformat(), "")
     r = client.post("/auth/login", json={"login": "alex", "pin": "1234"}, cookies={"sp_trust": token})
     assert r.status_code == 200 and "access_token" in r.json()
+
+def test_login_twofa_required(tmp_path, monkeypatch):
+    """M4 — employé avec 2FA activé, sans cookie de confiance → twofa_required + pending_token, sans access_token."""
+    emp = _prep(tmp_path, monkeypatch)
+    db.set_twofa(emp["id"], "totp", "ENC")
+    r = client.post("/auth/login", json={"login": "alex", "pin": "1234"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body.get("twofa_required") is True
+    assert "pending_token" in body
+    assert "access_token" not in body

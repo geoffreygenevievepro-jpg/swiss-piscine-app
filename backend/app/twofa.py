@@ -1,7 +1,6 @@
 """Logique 2FA : TOTP, chiffrement du secret, codes email, jetons d'appareil."""
 import base64
 import hashlib
-import hmac
 import secrets
 
 import pyotp

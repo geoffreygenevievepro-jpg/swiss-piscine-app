@@ -262,6 +262,23 @@ async function renderVerify(root, { pendingToken, isEmail, onDone }) {
   const form = root.querySelector("#tfa-form");
 
   if (isEmail) {
+    // I2 — envoyer automatiquement le code à l'arrivée sur l'écran verify email
+    (async () => {
+      try {
+        await twofaApi("/2fa/email/resend", { pendingToken });
+        errEl.style.color = "var(--ok, green)";
+        errEl.textContent = "Code envoyé par email.";
+        setTimeout(() => { errEl.textContent = ""; errEl.style.color = ""; }, 3000);
+      } catch (err) {
+        // Si throttle (429) ou autre erreur, on n'affiche rien de bloquant
+        if (err instanceof ApiError && err.status === 429) {
+          errEl.style.color = "var(--ok, green)";
+          errEl.textContent = "Un code a déjà été envoyé récemment.";
+          setTimeout(() => { errEl.textContent = ""; errEl.style.color = ""; }, 4000);
+        }
+      }
+    })();
+
     root.querySelector("#tfa-resend").addEventListener("click", async (e) => {
       e.currentTarget.disabled = true;
       try {
