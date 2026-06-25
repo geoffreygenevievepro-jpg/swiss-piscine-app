@@ -568,15 +568,69 @@ def _build_intervention_html(description, client_name, status, products,
     return "".join(html)
 
 
+_income_account_cache: dict[str, int | None] = {}
+
+
+def _default_income_account() -> int | None:
+    """Compte de produits par défaut (pour les lignes de facture sans produit catalogue)."""
+    if "id" not in _income_account_cache:
+        ro = get_client()
+        try:
+            rows = ro.execute_kw("account.account", "search_read",
+                                 [[["account_type", "=", "income"]]], {"fields": ["id"], "limit": 1})
+            _income_account_cache["id"] = rows[0]["id"] if rows else None
+        except Exception:
+            _income_account_cache["id"] = None
+    return _income_account_cache["id"]
+
+
+def create_draft_invoice(partner_id: int, products: list[dict], discount: float = 0.0,
+                         origin: str | None = None) -> int:
+    """Crée une facture client BROUILLON (account.move, move_type=out_invoice).
+
+    Lignes catalogue → product_id (Odoo calcule compte + taxes) ; lignes libres → nom +
+    compte de produits par défaut. Jamais validée : le bureau relit et comptabilise.
+    """
+    rw = get_write_client()
+    disc = float(discount or 0)
+    lines = []
+    fallback_acc = None
+    for p in products:
+        line = {"name": p.get("name") or "Article",
+                "quantity": float(p.get("qty") or 1), "discount": disc}
+        if p.get("price") is not None:
+            line["price_unit"] = float(p["price"])
+        if p.get("product_id"):
+            line["product_id"] = int(p["product_id"])
+        else:
+            if fallback_acc is None:
+                fallback_acc = _default_income_account()
+            if fallback_acc:
+                line["account_id"] = fallback_acc
+        lines.append((0, 0, line))
+    vals = {
+        "move_type": "out_invoice",
+        "partner_id": partner_id,
+        "company_id": settings.company_id,
+        "invoice_line_ids": lines,
+    }
+    if origin:
+        vals["invoice_origin"] = origin
+    return rw.execute_kw("account.move", "create", [vals])
+
+
 def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc: str,
                         *, partner_id: int | None = None, client_name: str | None = None,
                         type_label: str | None = None, photos: list[str] | None = None,
                         products: list[dict] | None = None, discount: float = 0.0,
                         vat_rate: float = 8.1, tag_ids: list[int] | None = None,
                         signature: str | None = None, status: str | None = None,
-                        employee_name: str = "", worker_ids: list[int] | None = None) -> int:
-    """Crée un planning.slot (company 5, rôle Technicien) + note récap (produits/totaux,
-    tags, statut) et pièces jointes (photos + signature). Le client libre n'est PAS créé."""
+                        employee_name: str = "", worker_ids: list[int] | None = None,
+                        materials: str | None = None, next_action: str | None = None,
+                        next_action_date: str | None = None, schedule: str | None = None) -> dict:
+    """Crée un planning.slot (company 5, rôle Technicien) + remplit la FICHE de chantier
+    (worksheet) + note récap + pièces jointes (photos/signature) + facture brouillon si
+    « à facturer ». Le client libre n'est créé que pour facturer."""
     workers = [int(w) for w in (worker_ids or [])] or [hr_employee_id]
     title_bits = [b for b in [type_label, client_name] if b]
     label = " — ".join(title_bits) or name or "Intervention"
@@ -591,7 +645,20 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
     if partner_id:
         vals["partner_id"] = partner_id
     rw = get_write_client()
-    slot_id = rw.execute_kw("planning.slot", "create", [vals])
+    try:
+        slot_id = rw.execute_kw("planning.slot", "create", [vals])
+    except Exception as e:
+        # Client rattaché à une autre société → on crée le créneau sans le lier
+        # (le nom du client reste dans le titre). Évite le blocage multi-sociétés.
+        msg = str(e).lower()
+        if partner_id and ("société" in msg or "company" in msg or "_check_company" in msg):
+            vals.pop("partner_id", None)
+            if client_name and client_name not in label:
+                vals["name"] = f"{label} — {client_name}"
+            slot_id = rw.execute_kw("planning.slot", "create", [vals])
+            partner_id = None  # partner incompatible : non réutilisé pour la facture
+        else:
+            raise
 
     att_ids: list[int] = []
     for i, photo in enumerate(photos or []):
@@ -619,13 +686,87 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
     if body:
         rw.execute_kw("planning.slot", "message_post", [[slot_id]],
                       {"body": body, "attachment_ids": att_ids})
-    return slot_id
+
+    # --- Fiche de chantier (worksheet) remplie comme via un rapport ---
+    worksheet_ok = False
+    try:
+        dur = None
+        try:
+            s = datetime.strptime(start_utc, "%Y-%m-%d %H:%M:%S")
+            e = datetime.strptime(end_utc, "%Y-%m-%d %H:%M:%S")
+            dur = round((e - s).total_seconds() / 3600, 2)
+        except Exception:
+            dur = None
+        report_like = {
+            "type": type_label,
+            "hours": dur,
+            "schedule": schedule,
+            "worker_names": worker_names,
+            "notes": name,
+            "materials": materials,
+            "parts": [p.get("name") for p in (products or []) if p.get("name")],
+            "tag_names": tag_names,
+            "next_action": next_action,
+            "next_action_date": next_action_date,
+            "signature": signature,
+        }
+        slot_ctx = {"start_datetime": start_utc, "partner_id": [partner_id or 0, client_name or "Client"]}
+        _fill_worksheet(get_client(), rw, slot_id, slot_ctx, report_like)
+        worksheet_ok = True
+    except Exception:
+        worksheet_ok = False
+
+    # --- Facturation : facture client BROUILLON si tag « à facturer » + produits ---
+    invoice_id = None
+    billable = bool(products) and any((n or "").lower() == "à facturer" for n in tag_names)
+    if billable:
+        bill_partner = partner_id
+        if not bill_partner and client_name:
+            # Client absent de la liste Odoo → on le crée avant de facturer.
+            try:
+                bill_partner = create_partner(client_name)
+                rw.execute_kw("planning.slot", "write", [[slot_id], {"partner_id": bill_partner}])
+            except Exception:
+                bill_partner = None
+        if bill_partner:
+            try:
+                invoice_id = create_draft_invoice(bill_partner, products, discount, origin=label)
+                rw.execute_kw("planning.slot", "message_post", [[slot_id]],
+                              {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
+            except Exception:
+                invoice_id = None
+
+    return {"id": slot_id, "worksheet": worksheet_ok,
+            "invoice": bool(invoice_id), "invoice_id": invoice_id}
 
 
-def search_partners(query: str, limit: int = 15) -> list[dict]:
-    """Recherche de clients (res.partner) par nom ou ville, pour le formulaire."""
+_emp_company_cache: dict[int, int] = {}
+
+
+def employee_company_id(hr_employee_id: int) -> int:
+    """Société (res.company id) de l'employé connecté. Repli : société configurée."""
+    if hr_employee_id not in _emp_company_cache:
+        try:
+            rows = get_client().execute_kw("hr.employee", "read", [[hr_employee_id]],
+                                           {"fields": ["company_id"]})
+            c = rows[0].get("company_id") if rows else None
+            _emp_company_cache[hr_employee_id] = c[0] if c else settings.company_id
+        except Exception:
+            _emp_company_cache[hr_employee_id] = settings.company_id
+    return _emp_company_cache[hr_employee_id]
+
+
+def search_partners(query: str, company_id: int | None = None, limit: int = 15) -> list[dict]:
+    """Recherche de clients (res.partner) par nom ou ville, pour le formulaire.
+
+    Restreint aux partenaires compatibles avec la société de l'employé (partagés ou
+    cette société), pour éviter les conflits multi-sociétés à la création (_check_company).
+    """
     client = get_client()
-    domain = ["|", ["name", "ilike", query], ["city", "ilike", query]]
+    cid = company_id or settings.company_id
+    domain = ["&",
+              "|", ["company_id", "=", False], ["company_id", "=", cid],
+              "|", ["name", "ilike", query], ["city", "ilike", query]]
     return client.execute_kw(
         "res.partner", "search_read", [domain],
         {"fields": ["name", "city", "street", "zip"], "limit": limit, "order": "name"},
@@ -781,9 +922,13 @@ _model_id_cache: dict[str, int | None] = {}
 def _model_id(model: str) -> int | None:
     if model not in _model_id_cache:
         ro = get_client()
-        rows = ro.execute_kw("ir.model", "search_read", [[["model", "=", model]]],
-                             {"fields": ["id"], "limit": 1})
-        _model_id_cache[model] = rows[0]["id"] if rows else None
+        try:
+            rows = ro.execute_kw("ir.model", "search_read", [[["model", "=", model]]],
+                                 {"fields": ["id"], "limit": 1})
+            _model_id_cache[model] = rows[0]["id"] if rows else None
+        except Exception:
+            # Le compte de service n'a pas accès à ir.model → activité ignorée (best-effort).
+            _model_id_cache[model] = None
     return _model_id_cache[model]
 
 
@@ -828,6 +973,66 @@ def search_report_products(query: str, limit: int = 20) -> list[dict]:
     )
 
 
+_WS_TEMPLATE_NAME = "Rapport d'intervention"
+_ws_template_cache: dict[str, int | None] = {}
+
+
+def _intervention_ws_template_id(ro) -> int | None:
+    """Id du modèle de fiche 'Rapport d'intervention' (planning.slot), mis en cache."""
+    if "id" not in _ws_template_cache:
+        rows = ro.execute_kw(
+            "worksheet.template", "search_read",
+            [[["name", "=", _WS_TEMPLATE_NAME], ["res_model", "=", "planning.slot"]]],
+            {"fields": ["id"], "limit": 1})
+        _ws_template_cache["id"] = rows[0]["id"] if rows else None
+    return _ws_template_cache["id"]
+
+
+def _fill_worksheet(ro, rw, slot_id: int, slot: dict, report: dict) -> None:
+    """Remplit la fiche d'intervention native Odoo (worksheet) du créneau.
+
+    Mappe les champs du rapport sur les propriétés du template (repérées par libellé,
+    robuste aux hashes). Renseigne aussi la signature client si présente.
+    """
+    tid = _intervention_ws_template_id(ro)
+    if not tid:
+        return
+    # Assigne le template puis relit la définition fusionnée (avec tous les champs).
+    rw.execute_kw("planning.slot", "write", [[slot_id], {"worksheet_template_id": tid}])
+    props = ro.execute_kw("planning.slot", "read", [[slot_id]],
+                          {"fields": ["worksheet_properties"]})[0].get("worksheet_properties") or []
+
+    parts = report.get("parts") or []
+    na = report.get("next_action")
+    na_lbl = _NEXT_ACTION_LABELS.get(na) if na else None
+    if na_lbl and report.get("next_action_date"):
+        na_lbl = f"{na_lbl} — {report['next_action_date']}"
+
+    by_label = {
+        "Type d'intervention": report.get("type"),
+        "Temps d'intervention": slot.get("start_datetime") or False,
+        "Durée (h)": float(report["hours"]) if report.get("hours") else None,
+        "Horaire": report.get("schedule"),
+        "Équipe sur le chantier": ", ".join(report.get("worker_names") or []) or None,
+        "Tâches réalisées": report.get("notes"),
+        "Matériel utilisé": report.get("materials"),
+        "Pièces utilisées": ", ".join(parts) if parts else None,
+        "Tags": ", ".join(report.get("tag_names") or []) or None,
+        "Prochaine action": na_lbl,
+    }
+    for p in props:
+        v = by_label.get(p.get("string"))
+        if v is not None:
+            p["value"] = v
+
+    vals = {"worksheet_properties": props}
+    if report.get("signature"):
+        vals["worksheet_signature"] = _strip_data_url(report["signature"])
+        partner = slot.get("partner_id")
+        vals["worksheet_signed_by"] = partner[1] if partner else "Client"
+    rw.execute_kw("planning.slot", "write", [[slot_id], vals])
+
+
 def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report: dict) -> dict | None:
     """Enregistre le rapport dans Odoo : note chatter + photos/signature + temps.
 
@@ -837,7 +1042,7 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     rows = ro.execute_kw(
         "planning.slot", "search_read",
         [[["id", "=", slot_id]] + _company_domain()],
-        {"fields": ["task_id", "project_id", "partner_id", "name"], "limit": 1},
+        {"fields": ["task_id", "project_id", "partner_id", "name", "start_datetime", "employee_ids"], "limit": 1},
     )
     if not rows:
         return None
@@ -861,22 +1066,30 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
                                       ro.execute_kw("hr.employee", "read", [worker_ids], {"fields": ["name"]})]
         except Exception:
             report["worker_names"] = []
+    elif slot.get("employee_ids"):
+        # Aucun employé re-précisé → on reprend l'équipe déjà assignée au créneau,
+        # pour que la fiche montre toujours qui a travaillé (cohérence avec « Je fais »).
+        try:
+            report["worker_names"] = [r["name"] for r in
+                                      ro.execute_kw("hr.employee", "read", [slot["employee_ids"]], {"fields": ["name"]})]
+        except Exception:
+            report["worker_names"] = []
 
-    # Pièces jointes : photos + signature.
+    # Pièces jointes : photos + signature — rattachées au CRÉNEAU (avec la fiche).
     att_ids: list[int] = []
     for i, photo in enumerate(report.get("photos", [])):
         att_ids.append(rw.execute_kw("ir.attachment", "create", [{
             "name": f"photo_{i + 1}.jpg", "datas": _strip_data_url(photo),
-            "res_model": model, "res_id": rid, "mimetype": "image/jpeg",
+            "res_model": "planning.slot", "res_id": slot_id, "mimetype": "image/jpeg",
         }]))
     if report.get("signature"):
         att_ids.append(rw.execute_kw("ir.attachment", "create", [{
             "name": "signature_client.png", "datas": _strip_data_url(report["signature"]),
-            "res_model": model, "res_id": rid, "mimetype": "image/png",
+            "res_model": "planning.slot", "res_id": slot_id, "mimetype": "image/png",
         }]))
 
-    # Note dans le chatter du chantier.
-    rw.execute_kw(model, "message_post", [[rid]], {
+    # Note récap dans l'historique du CRÉNEAU (regroupé avec la fiche d'intervention).
+    rw.execute_kw("planning.slot", "message_post", [[slot_id]], {
         "body": _build_report_html(report, employee_name),
         "attachment_ids": att_ids,
     })
@@ -909,9 +1122,17 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     activity_ok = _create_next_activity(
         rw, model, rid, report.get("next_action"), report.get("next_action_date"))
 
+    # Fiche d'intervention native Odoo (worksheet) — best-effort.
+    worksheet_ok = False
+    try:
+        _fill_worksheet(ro, rw, slot_id, slot, report)
+        worksheet_ok = True
+    except Exception:
+        worksheet_ok = False
+
     return {"ok": True, "model": model, "res_id": rid,
             "attachments": len(att_ids), "timesheet": timesheet_ok,
-            "activity": activity_ok, "tags": tags_applied}
+            "activity": activity_ok, "tags": tags_applied, "worksheet": worksheet_ok}
 
 
 # --- RH : congés, soldes, fiches de salaire -------------------------------

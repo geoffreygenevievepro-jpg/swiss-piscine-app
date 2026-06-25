@@ -13,6 +13,7 @@ class ProductLine(BaseModel):
     name: str = Field(..., max_length=200)       # produit (Odoo ou libre)
     qty: float = 1.0
     price: float | None = None                   # prix unitaire (optionnel)
+    product_id: int | None = None                # product.product Odoo (si choisi au catalogue)
 
 
 class NewIntervention(BaseModel):
@@ -31,6 +32,9 @@ class NewIntervention(BaseModel):
     signature: str | None = None                 # signature client base64
     status: str = Field("todo", pattern="^(done|todo)$")  # statut obligatoire
     worker_ids: list[int] = []                   # employés ayant travaillé sur le chantier
+    materials: str | None = None                 # matériel utilisé (fiche de chantier)
+    next_action: str | None = None               # rappel | appel | devis (prochaine action)
+    next_action_date: str | None = None          # YYYY-MM-DD (échéance)
 
 
 class NewPartner(BaseModel):
@@ -82,7 +86,7 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
     if odoo.slot_overlaps(emp["hr_employee_id"], start_utc, end_utc):
         raise HTTPException(409, "Ce créneau chevauche une autre intervention.")
     try:
-        slot_id = odoo.create_intervention(
+        res = odoo.create_intervention(
             emp["hr_employee_id"], body.name, start_utc, end_utc,
             partner_id=body.partner_id, client_name=body.client_name,
             type_label=body.type, photos=body.photos,
@@ -90,11 +94,13 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
             discount=body.discount, vat_rate=body.vat_rate,
             tag_ids=body.tag_ids, signature=body.signature,
             status=body.status, employee_name=emp["name"],
-            worker_ids=body.worker_ids,
+            worker_ids=body.worker_ids, materials=body.materials,
+            next_action=body.next_action, next_action_date=body.next_action_date,
+            schedule=f"{body.start_time} – {body.end_time}",
         )
     except Exception as e:
         raise odoo_unavailable(e)
-    return {"id": slot_id}
+    return res
 
 
 @router.get("/employees")
@@ -107,7 +113,7 @@ def employees(emp=Depends(get_current_employee)):
 def partners(q: str, emp=Depends(get_current_employee)):
     if len(q.strip()) < 2:
         return []
-    return odoo.search_partners(q.strip())
+    return odoo.search_partners(q.strip(), odoo.employee_company_id(emp["hr_employee_id"]))
 
 
 @router.post("/partners", status_code=201)

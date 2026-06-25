@@ -175,7 +175,7 @@ async function renderForm(root) {
 
   const meId = (profile.get() || {}).hr_employee_id || null;
   const photos = [];
-  const state = { products: [], tags: [], status: null, signed: false, workers: meId ? [meId] : [] };
+  const state = { products: [], tags: [], status: null, signed: false, workers: meId ? [meId] : [], next: "rien" };
   const date = selectedDate || todayISO();
 
   root.innerHTML = `
@@ -212,8 +212,11 @@ async function renderForm(root) {
         <div class="field" style="flex:1"><label>Fin</label><input id="iv-end" type="time" value="10:00" required /></div>
       </div>
 
-      <div class="field"><label>Description</label>
-        <textarea id="iv-desc" rows="3" placeholder="Détails de l'intervention…" style="width:100%;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:1rem"></textarea></div>
+      <div class="field"><label>Tâches réalisées / description</label>
+        <textarea id="iv-desc" rows="3" placeholder="Ce qui a été fait sur le chantier…" style="width:100%;border:1px solid var(--line);border-radius:12px;padding:12px;font-size:1rem"></textarea></div>
+
+      <div class="field"><label>Matériel utilisé</label>
+        <input id="iv-materials" type="text" placeholder="Ex. 2 sacs de sable, vanne 6 voies…" style="width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem" /></div>
 
       <div class="card"><strong>Produits</strong>
         <div id="p-lines" style="margin:10px 0"></div>
@@ -236,6 +239,15 @@ async function renderForm(root) {
       <div class="card"><strong>Tags</strong>
         <div id="iv-tags" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
           ${tags.map(t => `<button type="button" class="chip" data-tag="${t.id}">${escapeHtml(t.name)}</button>`).join("")}
+        </div></div>
+
+      <div class="card"><strong>Prochaine action</strong>
+        <div id="iv-next" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          ${[["rien", "Rien"], ["rappel", "Rappel"], ["appel", "Appel client"], ["devis", "Devis SAV"]].map(([v, l]) => `<button type="button" class="chip ${v === "rien" ? "active" : ""}" data-next="${v}">${l}</button>`).join("")}
+        </div>
+        <div id="iv-next-date" style="display:none;margin-top:10px">
+          <label style="font-size:.82rem;color:var(--muted)">Échéance (optionnel)</label>
+          <input id="iv-next-when" type="date" style="width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem" />
         </div></div>
 
       <div class="card"><strong>Photos</strong>
@@ -267,6 +279,15 @@ async function renderForm(root) {
     const b = e.target.closest("[data-status]"); if (!b) return;
     state.status = b.dataset.status;
     statusWrap.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === b));
+  });
+
+  // Prochaine action
+  const nextWrap = root.querySelector("#iv-next"), nextDate = root.querySelector("#iv-next-date");
+  nextWrap.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-next]"); if (!b) return;
+    state.next = b.dataset.next;
+    nextWrap.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === b));
+    nextDate.style.display = state.next === "rien" ? "none" : "block";
   });
 
   // Équipe sur le chantier (multi-sélection)
@@ -332,27 +353,29 @@ async function renderForm(root) {
   pVat.addEventListener("input", renderProducts);
   root.querySelector("#p-add").addEventListener("click", () => {
     const name = pName.value.trim(); if (!name) return;
-    state.products.push({ name, qty: Number(pQty.value) || 1, price: pPrice.value !== "" ? Number(pPrice.value) : null });
-    pName.value = ""; pQty.value = "1"; pPrice.value = ""; pResults.innerHTML = ""; renderProducts(); pName.focus();
+    state.products.push({ name, qty: Number(pQty.value) || 1, price: pPrice.value !== "" ? Number(pPrice.value) : null, product_id: selProductId });
+    pName.value = ""; pQty.value = "1"; pPrice.value = ""; pResults.innerHTML = ""; selProductId = null; renderProducts(); pName.focus();
   });
   pLines.addEventListener("click", (e) => {
     const b = e.target.closest("[data-rmp]"); if (!b) return;
     state.products.splice(Number(b.dataset.rmp), 1); renderProducts();
   });
-  let pTmr = null;
+  let pTmr = null, selProductId = null;
   pName.addEventListener("input", () => {
+    selProductId = null;  // saisie manuelle → on perd le lien produit Odoo
     clearTimeout(pTmr); const q = pName.value.trim();
     if (q.length < 2) { pResults.innerHTML = ""; return; }
     pTmr = setTimeout(async () => {
       try {
         const list = await api(`/products/search?q=${encodeURIComponent(q)}`);
-        pResults.innerHTML = list.map(p => `<div class="card" data-pname="${escapeHtml(p.name)}" data-pprice="${p.list_price != null ? p.list_price : ""}" style="cursor:pointer;padding:8px 10px;margin:6px 0">${escapeHtml(p.name)}${p.list_price ? `<span style="color:var(--muted);font-size:.8rem"> · ${fmtCHF(p.list_price)} CHF</span>` : ""}</div>`).join("");
+        pResults.innerHTML = list.map(p => `<div class="card" data-pid="${p.id}" data-pname="${escapeHtml(p.name)}" data-pprice="${p.list_price != null ? p.list_price : ""}" style="cursor:pointer;padding:8px 10px;margin:6px 0">${escapeHtml(p.name)}${p.list_price ? `<span style="color:var(--muted);font-size:.8rem"> · ${fmtCHF(p.list_price)} CHF</span>` : ""}</div>`).join("");
       } catch { pResults.innerHTML = ""; }
     }, 300);
   });
   pResults.addEventListener("click", (e) => {
     const d = e.target.closest("[data-pname]"); if (!d) return;
-    pName.value = d.dataset.pname; if (d.dataset.pprice) pPrice.value = d.dataset.pprice; pResults.innerHTML = ""; pPrice.focus();
+    pName.value = d.dataset.pname; selProductId = d.dataset.pid ? Number(d.dataset.pid) : null;
+    if (d.dataset.pprice) pPrice.value = d.dataset.pprice; pResults.innerHTML = ""; pPrice.focus();
   });
   renderProducts();
 
@@ -390,6 +413,7 @@ async function renderForm(root) {
       partner_id: pid.value ? Number(pid.value) : null,
       client_name: clientName,
       name: root.querySelector("#iv-desc").value.trim(),
+      materials: root.querySelector("#iv-materials").value.trim() || null,
       date: root.querySelector("#iv-date").value,
       start_time: root.querySelector("#iv-start").value,
       end_time: root.querySelector("#iv-end").value,
@@ -401,9 +425,18 @@ async function renderForm(root) {
       worker_ids: state.workers,
       signature: state.signed ? signCv.toDataURL("image/png") : null,
       status: state.status,
+      next_action: state.next === "rien" ? null : state.next,
+      next_action_date: (state.next !== "rien" && root.querySelector("#iv-next-when").value) ? root.querySelector("#iv-next-when").value : null,
     };
     submit.disabled = true; submit.innerHTML = `<span class="spinner"></span>`;
-    try { await api("/interventions", { method: "POST", body }); selectedDate = body.date; terrain.render(root); toast("Intervention créée"); }
+    try {
+      const res = await api("/interventions", { method: "POST", body });
+      selectedDate = body.date; terrain.render(root);
+      let msg = "Intervention créée";
+      if (res && res.worksheet) msg += " · fiche de chantier remplie";
+      if (res && res.invoice) msg += " · facture brouillon";
+      toast(msg);
+    }
     catch (e2) { submit.disabled = false; submit.textContent = "Créer l'intervention"; err.textContent = (e2 && e2.message) ? e2.message : "Échec de la création."; }
   });
 }
