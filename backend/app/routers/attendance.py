@@ -34,6 +34,21 @@ def summary(period: str = "week", offset: int = 0, emp=Depends(get_current_emplo
     return odoo.attendance_summary(emp["hr_employee_id"], period, offset)
 
 
+@router.get("/year")
+def year(emp=Depends(get_current_employee)):
+    return odoo.year_balance(emp["hr_employee_id"])
+
+
+@router.get("/days")
+def days(num: int = 30, emp=Depends(get_current_employee)):
+    return odoo.attendance_days(emp["hr_employee_id"], num)
+
+
+@router.get("/overview")
+def overview(emp=Depends(get_current_employee)):
+    return odoo.hours_overview(emp["hr_employee_id"])
+
+
 @router.post("/check-in")
 def check_in(body: Punch | None = None, emp=Depends(get_current_employee)):
     b = body or Punch()

@@ -9,14 +9,28 @@ from ..errors import odoo_unavailable
 router = APIRouter(tags=["interventions"])
 
 
+class ProductLine(BaseModel):
+    name: str = Field(..., max_length=200)       # produit (Odoo ou libre)
+    qty: float = 1.0
+    price: float | None = None                   # prix unitaire (optionnel)
+
+
 class NewIntervention(BaseModel):
-    name: str = Field("", max_length=400)        # description
+    name: str = Field("", max_length=2000)       # description
     type: str | None = None                      # type d'intervention
     date: str                                    # YYYY-MM-DD (heure locale)
     start_time: str = "08:00"                    # HH:MM
     end_time: str = "09:00"                       # HH:MM
-    partner_id: int                              # client OBLIGATOIRE
+    partner_id: int | None = None                # client Odoo (optionnel)
+    client_name: str | None = None               # client libre (NON créé dans Odoo)
     photos: list[str] = []                       # images base64 (data URL acceptée)
+    products: list[ProductLine] = []             # lignes produits (style devis)
+    discount: float = 0.0                        # remise globale %
+    vat_rate: float = 8.1                        # TVA %
+    tag_ids: list[int] = []                      # tags (à facturer, SAV…)
+    signature: str | None = None                 # signature client base64
+    status: str = Field("todo", pattern="^(done|todo)$")  # statut obligatoire
+    worker_ids: list[int] = []                   # employés ayant travaillé sur le chantier
 
 
 class NewPartner(BaseModel):
@@ -37,6 +51,8 @@ class Report(BaseModel):
     photos: list[str] = []            # images base64 (data URL acceptée)
     signature: str | None = None      # image base64 (data URL acceptée)
     parts: list[str] = []             # pièces utilisées (noms de produits)
+    tag_ids: list[int] = []           # project.tags à poser sur la tâche (à facturer, SAV…)
+    worker_ids: list[int] = []        # employés ayant travaillé sur cette tâche
     next_action: str | None = None    # rappel | appel | devis | rien
     next_action_date: str | None = None  # YYYY-MM-DD (échéance de l'activité)
 
@@ -68,11 +84,23 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
     try:
         slot_id = odoo.create_intervention(
             emp["hr_employee_id"], body.name, start_utc, end_utc,
-            body.partner_id, body.type, body.photos,
+            partner_id=body.partner_id, client_name=body.client_name,
+            type_label=body.type, photos=body.photos,
+            products=[p.model_dump() for p in body.products],
+            discount=body.discount, vat_rate=body.vat_rate,
+            tag_ids=body.tag_ids, signature=body.signature,
+            status=body.status, employee_name=emp["name"],
+            worker_ids=body.worker_ids,
         )
     except Exception as e:
         raise odoo_unavailable(e)
     return {"id": slot_id}
+
+
+@router.get("/employees")
+def employees(emp=Depends(get_current_employee)):
+    """Liste des employés (company 5) pour désigner qui a travaillé sur le chantier."""
+    return [{"id": e["id"], "name": e["name"]} for e in odoo.list_employees()]
 
 
 @router.get("/partners/search")
@@ -95,6 +123,11 @@ def create_partner(body: NewPartner, emp=Depends(get_current_employee)):
 @router.get("/report-types")
 def report_types(emp=Depends(get_current_employee)):
     return odoo.REPORT_TYPES
+
+
+@router.get("/report-tags")
+def report_tags(emp=Depends(get_current_employee)):
+    return odoo.REPORT_TAGS
 
 
 @router.get("/products/search")

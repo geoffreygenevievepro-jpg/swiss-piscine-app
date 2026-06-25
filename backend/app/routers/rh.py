@@ -2,7 +2,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import odoo
+from datetime import datetime, timezone
+
+from .. import db, odoo
 from ..deps import get_current_employee
 from ..errors import odoo_unavailable
 
@@ -41,6 +43,17 @@ def create_leave(body: NewLeave, emp=Depends(get_current_employee)):
         )
     except Exception as e:
         raise odoo_unavailable(e)
+    # Notifie le manager (supérieur direct) qu'une demande l'attend.
+    try:
+        mgr = odoo.employee_manager_hr_id(emp["hr_employee_id"])
+        if mgr:
+            db.insert_notification(
+                mgr, "leave_to_approve", "Congé à valider",
+                f"{emp['name']} · {body.date_from} → {body.date_to}",
+                f"leavereq-{leave_id}",
+                datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        pass
     return {"id": leave_id}
 
 

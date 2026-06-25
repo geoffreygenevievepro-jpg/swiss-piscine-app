@@ -2,7 +2,10 @@
 backend/data/
 backend/.secret_key
 backend/.env
+backend/.dev.vars
 backend/*.log
+backend/.venv/
+.venv/
 __pycache__/
 *.pyc
 

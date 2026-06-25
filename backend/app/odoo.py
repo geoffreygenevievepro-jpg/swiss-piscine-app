@@ -242,6 +242,108 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
     }
 
 
+def year_balance(hr_employee_id: int) -> dict:
+    """Cumul de l'année en cours : heures réalisées vs dues (à ce jour) + solde.
+    Dû approximé (hours_per_week / 5 par jour ouvré écoulé, jours fériés ignorés)."""
+    now = datetime.now(TZ)
+    weekly = _employee_weekly_hours(hr_employee_id)
+    daily = weekly / 5
+    start_local = datetime(now.year, 1, 1, tzinfo=TZ)
+    start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    now_utc = now.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+    atts = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start_utc], ["check_in", "<", now_utc]]],
+        {"fields": ["worked_hours"]},
+    )
+    worked = round(sum(a.get("worked_hours") or 0.0 for a in atts), 1)
+    weekdays, d, today = 0, start_local.date(), now.date()
+    while d <= today:
+        if d.weekday() < 5:
+            weekdays += 1
+        d += timedelta(days=1)
+    due = round(weekdays * daily, 1)
+    return {"year": now.year, "worked": worked, "due": due, "solde": round(worked - due, 1)}
+
+
+def attendance_days(hr_employee_id: int, num_days: int = 30) -> dict:
+    """Heures travaillées + nombre de pointages par jour sur les `num_days`
+    derniers jours (aujourd'hui inclus). Pour la bande calendrier de l'onglet Présence."""
+    num_days = max(1, min(num_days, 120))
+    now = datetime.now(TZ)
+    end_local = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    start_local = end_local - timedelta(days=num_days)
+    start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+    atts = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start_utc], ["check_in", "<", end_utc]]],
+        {"fields": ["check_in", "worked_hours"]},
+    )
+    by: dict = {}
+    for a in atts:
+        day = _parse_odoo_dt(a["check_in"]).astimezone(TZ).date().isoformat()
+        slot = by.setdefault(day, {"worked": 0.0, "count": 0})
+        slot["worked"] += a.get("worked_hours") or 0.0
+        slot["count"] += 1
+    days, d, last = [], start_local.date(), (end_local - timedelta(days=1)).date()
+    while d <= last:
+        iso = d.isoformat()
+        info = by.get(iso, {"worked": 0.0, "count": 0})
+        days.append({"date": iso, "worked": round(info["worked"], 2), "count": info["count"]})
+        d += timedelta(days=1)
+    return {"days": days}
+
+
+def hours_overview(hr_employee_id: int) -> dict:
+    """Réalisé vs dû (écoulé) pour le jour / le mois / l'année, avec % et heures sup.
+    Le dû ne compte que les jours ouvrés ÉCOULÉS (pas les mois/jours à venir)."""
+    now = datetime.now(TZ)
+    weekly = _employee_weekly_hours(hr_employee_id)
+    daily = weekly / 5
+    year_start = datetime(now.year, 1, 1, tzinfo=TZ)
+    start_utc = year_start.astimezone(timezone.utc).strftime(ODOO_FMT)
+    now_utc = now.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+    atts = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start_utc], ["check_in", "<", now_utc]]],
+        {"fields": ["check_in", "worked_hours"]},
+    )
+    today = now.date()
+    w_day = w_month = w_year = 0.0
+    for a in atts:
+        d = _parse_odoo_dt(a["check_in"]).astimezone(TZ).date()
+        wh = a.get("worked_hours") or 0.0
+        w_year += wh
+        if d.year == today.year and d.month == today.month:
+            w_month += wh
+        if d == today:
+            w_day += wh
+
+    def weekdays(d0, d1):
+        n, d = 0, d0
+        while d <= d1:
+            if d.weekday() < 5:
+                n += 1
+            d += timedelta(days=1)
+        return n
+
+    due_day = daily if today.weekday() < 5 else 0.0
+    due_month = weekdays(today.replace(day=1), today) * daily
+    due_year = weekdays(today.replace(month=1, day=1), today) * daily
+
+    def pack(w, due):
+        pct = round(w / due * 100) if due > 0 else (100 if w > 0 else 0)
+        return {"worked": round(w, 1), "due": round(due, 1), "pct": pct,
+                "overtime": round(max(0.0, w - due), 1)}
+
+    return {"day": pack(w_day, due_day), "month": pack(w_month, due_month),
+            "year": pack(w_year, due_year)}
+
+
 # --- Saisie manuelle / édition des pointages (hr.attendance) ---------------
 # Édition/suppression réservée aux pointages créés depuis moins de 24 h, et
 # uniquement ceux de l'employé courant (cloisonnement).
@@ -388,9 +490,9 @@ def today_interventions(hr_employee_id: int, date_iso: str | None = None) -> dic
 
 
 def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
-    """Détail d'un créneau + infos client. Restreint aux créneaux de l'employé."""
+    """Détail d'un créneau + infos client (tout créneau de la société, pour rapport)."""
     client = get_client()
-    domain = [["id", "=", slot_id], ["employee_ids", "in", [hr_employee_id]]] + _company_domain()
+    domain = [["id", "=", slot_id]] + _company_domain()
     rows = client.execute_kw(
         "planning.slot", "search_read", [domain],
         {"fields": _SLOT_FIELDS + ["employee_ids"], "limit": 1},
@@ -414,29 +516,109 @@ def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
     return slot
 
 
+_STATUS_LABELS = {"done": "✅ Tâche terminée", "todo": "🟠 Tâche à terminer"}
+
+
+def _build_intervention_html(description, client_name, status, products,
+                             discount, vat_rate, tag_names, employee_name,
+                             worker_names=None) -> str:
+    """Note récapitulative de l'intervention (chatter du créneau) : infos + tableau produits."""
+    html = ["<p><strong>🧰 Intervention</strong></p><ul>"]
+    if employee_name:
+        html.append(f"<li><strong>Saisi par :</strong> {_esc(employee_name)}</li>")
+    if worker_names:
+        html.append(f"<li><strong>Équipe sur le chantier :</strong> {_esc(', '.join(worker_names))}</li>")
+    if client_name:
+        html.append(f"<li><strong>Client :</strong> {_esc(client_name)}</li>")
+    if status in _STATUS_LABELS:
+        html.append(f"<li><strong>Statut :</strong> {_esc(_STATUS_LABELS[status])}</li>")
+    if tag_names:
+        html.append(f"<li><strong>Tags :</strong> {_esc(', '.join(tag_names))}</li>")
+    html.append("</ul>")
+    if description:
+        html.append(f"<p><strong>Description :</strong><br>{_esc(description)}</p>")
+    lines = [p for p in products if (p.get("name") or "").strip()]
+    if lines:
+        subtotal, rows = 0.0, []
+        for p in lines:
+            qty = float(p.get("qty") or 0)
+            price = float(p.get("price") or 0)
+            lt = qty * price
+            subtotal += lt
+            rows.append(
+                f"<tr><td>{_esc(p['name'])}</td><td style='text-align:right'>{qty:g}</td>"
+                f"<td style='text-align:right'>{price:.2f}</td>"
+                f"<td style='text-align:right'>{lt:.2f}</td></tr>")
+        disc_amt = subtotal * (discount or 0) / 100
+        after = subtotal - disc_amt
+        vat_amt = after * (vat_rate or 0) / 100
+        total = after + vat_amt
+        html.append("<p><strong>Produits</strong></p>")
+        html.append("<table border='1' cellpadding='4' style='border-collapse:collapse'>"
+                    "<tr><th>Produit</th><th>Qté</th><th>PU</th><th>Total</th></tr>"
+                    + "".join(rows) + "</table><ul>")
+        summary = [("Sous-total", subtotal)]
+        if discount:
+            summary.append((f"Remise {discount:g}%", -disc_amt))
+        summary.append((f"TVA {vat_rate:g}%", vat_amt))
+        summary.append(("Total", total))
+        for lbl, val in summary:
+            html.append(f"<li><strong>{_esc(lbl)} :</strong> {val:.2f} CHF</li>")
+        html.append("</ul>")
+    return "".join(html)
+
+
 def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc: str,
-                        partner_id: int | None = None, type_label: str | None = None,
-                        photos: list[str] | None = None) -> int:
-    """Crée un créneau planning.slot (company 5, rôle Technicien), + photos optionnelles."""
-    label = f"{type_label} — {name}" if (type_label and name) else (type_label or name)
+                        *, partner_id: int | None = None, client_name: str | None = None,
+                        type_label: str | None = None, photos: list[str] | None = None,
+                        products: list[dict] | None = None, discount: float = 0.0,
+                        vat_rate: float = 8.1, tag_ids: list[int] | None = None,
+                        signature: str | None = None, status: str | None = None,
+                        employee_name: str = "", worker_ids: list[int] | None = None) -> int:
+    """Crée un planning.slot (company 5, rôle Technicien) + note récap (produits/totaux,
+    tags, statut) et pièces jointes (photos + signature). Le client libre n'est PAS créé."""
+    workers = [int(w) for w in (worker_ids or [])] or [hr_employee_id]
+    title_bits = [b for b in [type_label, client_name] if b]
+    label = " — ".join(title_bits) or name or "Intervention"
     vals = {
-        "employee_ids": [(6, 0, [hr_employee_id])],
+        "employee_ids": [(6, 0, workers)],
         "start_datetime": start_utc,
         "end_datetime": end_utc,
         "company_id": settings.company_id,
         "role_id": ROLE_TECHNICIEN_ID,
+        "name": label,
     }
-    if label:
-        vals["name"] = label
     if partner_id:
         vals["partner_id"] = partner_id
     rw = get_write_client()
     slot_id = rw.execute_kw("planning.slot", "create", [vals])
+
+    att_ids: list[int] = []
     for i, photo in enumerate(photos or []):
-        rw.execute_kw("ir.attachment", "create", [{
+        att_ids.append(rw.execute_kw("ir.attachment", "create", [{
             "name": f"photo_{i + 1}.jpg", "datas": _strip_data_url(photo),
             "res_model": "planning.slot", "res_id": slot_id, "mimetype": "image/jpeg",
-        }])
+        }]))
+    if signature:
+        att_ids.append(rw.execute_kw("ir.attachment", "create", [{
+            "name": "signature_client.png", "datas": _strip_data_url(signature),
+            "res_model": "planning.slot", "res_id": slot_id, "mimetype": "image/png",
+        }]))
+
+    tag_names = [t["name"] for t in REPORT_TAGS if t["id"] in (tag_ids or [])]
+    worker_names = []
+    try:
+        rows = get_client().execute_kw("hr.employee", "read", [workers], {"fields": ["name"]})
+        worker_names = [r["name"] for r in rows]
+    except Exception:
+        worker_names = []
+    body = _build_intervention_html(
+        description=name, client_name=client_name, status=status,
+        products=products or [], discount=discount, vat_rate=vat_rate,
+        tag_names=tag_names, employee_name=employee_name, worker_names=worker_names)
+    if body:
+        rw.execute_kw("planning.slot", "message_post", [[slot_id]],
+                      {"body": body, "attachment_ids": att_ids})
     return slot_id
 
 
@@ -523,6 +705,15 @@ def slot_overlaps(hr_employee_id: int, start_utc: str, end_utc: str,
 
 # --- Rapport d'intervention -----------------------------------------------
 
+# Tags proposés sur le rapport d'intervention (project.tags réels dans Odoo heiwa).
+# Posés sur la project.task cible du rapport. Ids fixes (créés/validés le 2026-06-25).
+REPORT_TAGS = [
+    {"id": 67, "name": "à facturer"},
+    {"id": 80, "name": "SAV SP"},
+    {"id": 81, "name": "SAV client"},
+]
+
+
 REPORT_TYPES = [
     "Mise en service", "Entretien", "Dépannage", "Hivernage", "SAV", "Montage",
     "Bétonage", "Local technique", "Préparation Piscine", "PVC", "Pose Volet",
@@ -550,10 +741,12 @@ def _build_report_html(report: dict, employee_name: str) -> str:
     rows = [
         ("Type d'intervention", report.get("type")),
         ("Technicien", employee_name),
+        ("Équipe sur le chantier", ", ".join(report.get("worker_names") or []) or None),
         ("Horaire", report.get("schedule")),
         ("Durée", f'{report["hours"]:.2f} h' if report.get("hours") else None),
         ("Matériel utilisé", report.get("materials")),
         ("Pièces utilisées", ", ".join(parts) if parts else None),
+        ("Tags", ", ".join(report.get("tag_names") or []) or None),
     ]
     html = ["<p><strong>📋 Rapport d'intervention</strong></p><ul>"]
     for label, val in rows:
@@ -631,7 +824,7 @@ def search_report_products(query: str, limit: int = 20) -> list[dict]:
               ["name", "ilike", query]]
     return ro.execute_kw(
         "product.product", "search_read", [domain],
-        {"fields": ["name", "default_code"], "limit": limit, "order": "name"},
+        {"fields": ["name", "default_code", "list_price"], "limit": limit, "order": "name"},
     )
 
 
@@ -643,7 +836,7 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     ro = get_client()
     rows = ro.execute_kw(
         "planning.slot", "search_read",
-        [[["id", "=", slot_id], ["employee_ids", "in", [hr_employee_id]]] + _company_domain()],
+        [[["id", "=", slot_id]] + _company_domain()],
         {"fields": ["task_id", "project_id", "partner_id", "name"], "limit": 1},
     )
     if not rows:
@@ -651,6 +844,23 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     slot = rows[0]
     model, rid = _slot_target(slot, slot_id)
     rw = get_write_client()
+
+    # Tags choisis (project.tags) : noms pour la note + écriture sur la tâche/chantier.
+    tag_ids = [int(t) for t in (report.get("tag_ids") or [])]
+    report["tag_names"] = [t["name"] for t in REPORT_TAGS if t["id"] in tag_ids]
+
+    # Employés ayant travaillé : mise à jour du créneau + noms pour la note.
+    worker_ids = [int(w) for w in (report.get("worker_ids") or [])]
+    if worker_ids:
+        try:
+            rw.execute_kw("planning.slot", "write", [[slot_id], {"employee_ids": [(6, 0, worker_ids)]}])
+        except Exception:
+            pass
+        try:
+            report["worker_names"] = [r["name"] for r in
+                                      ro.execute_kw("hr.employee", "read", [worker_ids], {"fields": ["name"]})]
+        except Exception:
+            report["worker_names"] = []
 
     # Pièces jointes : photos + signature.
     att_ids: list[int] = []
@@ -670,6 +880,15 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
         "body": _build_report_html(report, employee_name),
         "attachment_ids": att_ids,
     })
+
+    # Tags posés sur la tâche / le chantier (project.tags) quand la cible le supporte.
+    tags_applied = False
+    if tag_ids and model in ("project.task", "project.project"):
+        try:
+            rw.execute_kw(model, "write", [[rid], {"tag_ids": [(4, tid) for tid in tag_ids]}])
+            tags_applied = True
+        except Exception:
+            tags_applied = False
 
     # Ligne de temps (best-effort : ne bloque pas le rapport si elle échoue).
     timesheet_ok = False
@@ -691,7 +910,8 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
         rw, model, rid, report.get("next_action"), report.get("next_action_date"))
 
     return {"ok": True, "model": model, "res_id": rid,
-            "attachments": len(att_ids), "timesheet": timesheet_ok, "activity": activity_ok}
+            "attachments": len(att_ids), "timesheet": timesheet_ok,
+            "activity": activity_ok, "tags": tags_applied}
 
 
 # --- RH : congés, soldes, fiches de salaire -------------------------------
@@ -854,6 +1074,27 @@ def week_planning(hr_employee_id: int, offset: int = 0) -> dict:
     return {"week_start": monday.date().isoformat(), "slots": slots}
 
 
+def upcoming_planning(hr_employee_id: int, days: int = 5) -> dict:
+    """Créneaux planifiés de l'employé sur les `days` prochains jours (aujourd'hui inclus)."""
+    days = max(1, min(days, 14))
+    now = datetime.now(TZ)
+    start_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = start_local + timedelta(days=days)
+    start = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+    slots = ro.execute_kw(
+        "planning.slot", "search_read",
+        [[["employee_ids", "in", [hr_employee_id]],
+          ["start_datetime", ">=", start], ["start_datetime", "<", end]] + _company_domain()],
+        {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
+    )
+    for s in slots:
+        s["label"] = _slot_label(s)
+        s["day"] = _parse_odoo_dt(s["start_datetime"]).astimezone(TZ).date().isoformat()
+    return {"start": start_local.date().isoformat(), "days": days, "slots": slots}
+
+
 def team_week(offset: int = 0) -> dict:
     """Grille équipe (company 5) : par employé, qui travaille / est absent chaque jour."""
     monday, next_monday = _week_bounds(offset)
@@ -874,12 +1115,15 @@ def team_week(offset: int = 0) -> dict:
     slots = ro.execute_kw(
         "planning.slot", "search_read",
         [[["start_datetime", ">=", start_utc], ["start_datetime", "<", end_utc]] + _company_domain()],
-        {"fields": ["employee_ids", "start_datetime"]},
+        {"fields": _SLOT_FIELDS + ["employee_ids"], "order": "start_datetime asc"},
     )
     for s in slots:
-        day = _parse_odoo_dt(s["start_datetime"]).astimezone(TZ).date().isoformat()
+        dt = _parse_odoo_dt(s["start_datetime"]).astimezone(TZ)
+        day = dt.date().isoformat()
+        entry = {"id": s["id"], "time": dt.strftime("%H:%M"), "label": _slot_label(s)}
         for eid in s.get("employee_ids", []):
             if eid in members and day in members[eid]["days"]:
+                members[eid]["days"][day].setdefault("slots", []).append(entry)
                 members[eid]["days"][day]["work"] = True
 
     leaves = ro.execute_kw(
@@ -899,6 +1143,28 @@ def team_week(offset: int = 0) -> dict:
                 members[eid]["days"][d]["leave"] = icon
 
     return {"week_start": week_from, "dates": dates, "members": list(members.values())}
+
+
+def upcoming_holidays(limit: int = 6) -> list[dict]:
+    """Prochains jours fériés (canton FR) de Swiss Piscine, depuis aujourd'hui.
+    Stockés dans resource.calendar.leaves (resource_id=False, préfixe « Férié FR — »)."""
+    ro = get_client()
+    cutoff = datetime.now(TZ).date().isoformat() + " 00:00:00"
+    rows = ro.execute_kw(
+        "resource.calendar.leaves", "search_read",
+        [[["company_id", "=", settings.company_id], ["resource_id", "=", False],
+          ["name", "like", "Férié FR"], ["date_from", ">=", cutoff]]],
+        {"fields": ["name", "date_from"], "order": "date_from asc", "limit": limit},
+    )
+    out = []
+    for r in rows:
+        name = r["name"]
+        for pref in ("Férié FR — ", "Férié FR - ", "Férié FR —", "Férié FR -", "Férié FR"):
+            if name.startswith(pref):
+                name = name[len(pref):].strip(" —-")
+                break
+        out.append({"date": r["date_from"][:10], "name": name})
+    return out
 
 
 def employee_extra(hr_employee_id: int) -> dict:
@@ -926,12 +1192,31 @@ def employee_extra(hr_employee_id: int) -> dict:
 
 # --- Manager : validation des congés ---------------------------------------
 
-def pending_leaves() -> list[dict]:
-    """Demandes de congé en attente de validation (équipe company 5)."""
+def employee_manager_hr_id(hr_employee_id: int) -> int | None:
+    """Supérieur direct (parent_id) de l'employé, ou None."""
+    rows = get_client().execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["parent_id"]})
+    if rows and rows[0].get("parent_id"):
+        return rows[0]["parent_id"][0]
+    return None
+
+
+def leave_belongs_to_manager(leave_id: int, manager_hr_id: int) -> bool:
+    """Vrai si la demande appartient à un membre de l'équipe du manager (parent_id)."""
+    n = get_client().execute_kw(
+        "hr.leave", "search_count",
+        [[["id", "=", leave_id], ["employee_id.parent_id", "=", manager_hr_id]]])
+    return n > 0
+
+
+def pending_leaves(manager_hr_id: int | None = None) -> list[dict]:
+    """Demandes en attente (company 5). Si manager_hr_id : seulement son équipe
+    (employés dont le supérieur = manager). Sinon (admin) : toutes."""
     ro = get_client()
+    domain = [["employee_company_id", "=", settings.company_id], ["state", "in", ["confirm", "validate1"]]]
+    if manager_hr_id:
+        domain.append(["employee_id.parent_id", "=", manager_hr_id])
     leaves = ro.execute_kw(
-        "hr.leave", "search_read",
-        [[["employee_company_id", "=", settings.company_id], ["state", "in", ["confirm", "validate1"]]]],
+        "hr.leave", "search_read", [domain],
         {"fields": ["employee_id", "work_entry_type_id", "request_date_from",
                     "request_date_to", "number_of_days", "name", "state"],
          "order": "request_date_from asc"},
@@ -944,8 +1229,393 @@ def pending_leaves() -> list[dict]:
 
 
 def approve_leave(leave_id: int) -> None:
-    get_write_client().execute_kw("hr.leave", "action_approve", [[leave_id]])
+    """Valide entièrement la demande, quel que soit le type de validation.
+    Types « both » : confirm → validate1 (action_approve) → validate (action_validate).
+    Types « manager »/« hr » : confirm → validate en une étape."""
+    rw = get_write_client()
+    ro = get_client()
+
+    def state():
+        return ro.execute_kw("hr.leave", "read", [[leave_id]], {"fields": ["state"]})[0]["state"]
+
+    if state() == "confirm":
+        rw.execute_kw("hr.leave", "action_approve", [[leave_id]])
+    if state() == "validate1":
+        rw.execute_kw("hr.leave", "action_validate", [[leave_id]])
 
 
 def refuse_leave(leave_id: int) -> None:
     get_write_client().execute_kw("hr.leave", "action_refuse", [[leave_id]])
+
+
+# --- Admin : vue d'ensemble équipe ------------------------------------------
+
+def admin_employees_hours() -> list[dict]:
+    """Par employé (société courante, actifs) : heures réalisées jour / semaine / mois / année."""
+    ro = get_client()
+    emps = ro.execute_kw(
+        "hr.employee", "search_read", [_company_domain() + [["active", "=", True]]],
+        {"fields": ["name"], "order": "name"},
+    )
+    ids = [e["id"] for e in emps]
+    if not ids:
+        return []
+    now = datetime.now(TZ)
+    year_start = datetime(now.year, 1, 1, tzinfo=TZ)
+    atts = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "in", ids],
+          ["check_in", ">=", year_start.astimezone(timezone.utc).strftime(ODOO_FMT)],
+          ["check_in", "<", now.astimezone(timezone.utc).strftime(ODOO_FMT)]]],
+        {"fields": ["employee_id", "check_in", "worked_hours"]},
+    )
+    today = now.date()
+    monday = today - timedelta(days=today.weekday())
+    agg = {i: {"day": 0.0, "week": 0.0, "month": 0.0, "year": 0.0} for i in ids}
+    for a in atts:
+        eid = a["employee_id"][0] if a.get("employee_id") else None
+        ag = agg.get(eid)
+        if not ag:
+            continue
+        d = _parse_odoo_dt(a["check_in"]).astimezone(TZ).date()
+        wh = a.get("worked_hours") or 0.0
+        ag["year"] += wh
+        if d.year == today.year and d.month == today.month:
+            ag["month"] += wh
+        if d >= monday:
+            ag["week"] += wh
+        if d == today:
+            ag["day"] += wh
+    return [{"id": e["id"], "name": e["name"], **{k: round(v, 1) for k, v in agg[e["id"]].items()}} for e in emps]
+
+
+def admin_leaves() -> list[dict]:
+    """Toutes les demandes de congé (société courante) : en attente + validées, pour liste/calendrier."""
+    ro = get_client()
+    leaves = ro.execute_kw(
+        "hr.leave", "search_read",
+        [[["employee_company_id", "=", settings.company_id], ["state", "in", ["confirm", "validate1", "validate", "refuse"]]]],
+        {"fields": ["employee_id", "work_entry_type_id", "request_date_from",
+                    "request_date_to", "number_of_days", "state"],
+         "order": "request_date_from desc"},
+    )
+    for l in leaves:
+        name = l["work_entry_type_id"][1] if l.get("work_entry_type_id") else None
+        l["icon"], l["type_label"] = _friendly_leave(name)
+        l["who"] = l["employee_id"][1] if l.get("employee_id") else "—"
+    return leaves
+
+
+# --- Documents (module Documents Odoo, dossier par employé) -----------------
+# hr.employee.hr_employee_folder_id pointe le dossier racine. Sous-dossiers
+# cohérents : « 1. Renseignements », « 2. Contrat », « 2. Certificats de salaire »,
+# « 1. Maladie ». On résout par mots-clés sous l'arbre de l'employé (cloisonné).
+
+def _employee_folder_tree(hr_employee_id: int):
+    """(root_id, folders) — tous les sous-dossiers de l'employé (id, name, parent)."""
+    ro = get_client()
+    emp = ro.execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["hr_employee_folder_id"]})
+    if not emp or not emp[0].get("hr_employee_folder_id"):
+        return None, []
+    root = emp[0]["hr_employee_folder_id"][0]
+    folders = [{"id": root, "name": emp[0]["hr_employee_folder_id"][1], "parent": None}]
+    frontier = [root]
+    for _ in range(6):
+        kids = ro.execute_kw(
+            "documents.document", "search_read",
+            [[["type", "=", "folder"], ["folder_id", "in", frontier]]],
+            {"fields": ["name", "folder_id"]},
+        )
+        if not kids:
+            break
+        folders += [{"id": k["id"], "name": k["name"], "parent": k["folder_id"][0]} for k in kids]
+        frontier = [k["id"] for k in kids]
+    return root, folders
+
+
+def _category_folder(folders, *keywords):
+    for f in folders:
+        n = f["name"].lower()
+        if any(k in n for k in keywords):
+            return f["id"]
+    return None
+
+
+def _descendants(folders, folder_id):
+    ids = {folder_id}
+    changed = True
+    while changed:
+        changed = False
+        for f in folders:
+            if f["parent"] in ids and f["id"] not in ids:
+                ids.add(f["id"]); changed = True
+    return list(ids)
+
+
+def _docs_under(folder_ids):
+    if not folder_ids:
+        return []
+    ro = get_client()
+    docs = ro.execute_kw(
+        "documents.document", "search_read",
+        [[["type", "=", "binary"], ["folder_id", "in", folder_ids]]],
+        {"fields": ["name", "mimetype", "create_date"], "order": "create_date desc"},
+    )
+    return [{"id": d["id"], "name": d["name"], "mimetype": d.get("mimetype") or "",
+             "date": (d.get("create_date") or "")[:10]} for d in docs]
+
+
+def employee_documents(hr_employee_id: int) -> dict:
+    """Documents de l'employé par catégorie (Documents Odoo)."""
+    root, folders = _employee_folder_tree(hr_employee_id)
+    empty = {"personal": [], "contract": [], "salary_certificates": [], "medical": []}
+    if root is None:
+        return empty
+
+    def cat(*kw):
+        cf = _category_folder(folders, *kw)
+        return _docs_under(_descendants(folders, cf)) if cf else []
+
+    return {
+        "personal": cat("renseignement"),
+        "contract": cat("contrat"),
+        "salary_certificates": cat("certificat de salaire", "certificats de salaire"),
+        "medical": cat("maladie"),
+    }
+
+
+def document_file(hr_employee_id: int, doc_id: int) -> dict | None:
+    """Fichier (base64) d'un document, restreint à l'arbre de dossiers de l'employé."""
+    root, folders = _employee_folder_tree(hr_employee_id)
+    if root is None:
+        return None
+    folder_ids = {f["id"] for f in folders}
+    ro = get_client()
+    rows = ro.execute_kw("documents.document", "read", [[doc_id]],
+                         {"fields": ["name", "datas", "mimetype", "folder_id", "type"]})
+    if not rows:
+        return None
+    d = rows[0]
+    if d.get("type") != "binary" or not d.get("folder_id") or d["folder_id"][0] not in folder_ids:
+        return None
+    return {"available": bool(d.get("datas")), "name": d["name"],
+            "datas": d.get("datas"), "mimetype": d.get("mimetype") or "application/octet-stream"}
+
+
+# --- Fiche employé : champs personnels modifiables par l'employé -------------
+EMPLOYEE_EDITABLE = {
+    "private_street", "private_street2", "private_zip", "private_city",
+    "private_phone", "private_email", "work_phone",
+    "emergency_contact", "emergency_phone", "place_of_birth",
+    "permit_no", "visa_no", "passport_id", "identification_id",
+    "spouse_complete_name", "study_field", "study_school",
+    "birthday", "work_permit_expiration_date", "visa_expire", "spouse_birthdate",
+    "children", "marital", "certificate", "lang",
+    "private_country_id", "country_id", "country_of_birth",
+}
+_EMP_M2O = {"private_country_id", "country_id", "country_of_birth"}
+_EMP_INT = {"children"}
+
+
+def employee_details(hr_employee_id: int) -> dict:
+    """Champs personnels de l'employé (valeurs actuelles + présence d'un scan de permis)."""
+    ro = get_client()
+    rows = ro.execute_kw("hr.employee", "read", [[hr_employee_id]],
+                         {"fields": list(EMPLOYEE_EDITABLE) + ["has_work_permit"]})
+    if not rows:
+        return {}
+    e = rows[0]
+    out = {}
+    for k in EMPLOYEE_EDITABLE:
+        v = e.get(k)
+        if k in _EMP_M2O:
+            out[k] = {"id": v[0], "name": v[1]} if v else None
+        else:
+            out[k] = v if v not in (False,) else None
+    out["has_permit_scan"] = bool(e.get("has_work_permit"))
+    return out
+
+
+def update_employee_details(hr_employee_id: int, data: dict) -> dict:
+    """Écrit les champs autorisés sur la fiche de l'employé (sa propre fiche)."""
+    vals = {}
+    for k, v in (data or {}).items():
+        if k not in EMPLOYEE_EDITABLE:
+            continue
+        if k in _EMP_M2O:
+            vals[k] = int(v) if v else False
+        elif k in _EMP_INT:
+            try:
+                vals[k] = int(v) if v not in (None, "", False) else 0
+            except (TypeError, ValueError):
+                vals[k] = 0
+        else:
+            vals[k] = v if v not in (None, "") else False
+    if vals:
+        get_write_client().execute_kw("hr.employee", "write", [[hr_employee_id], vals])
+    return {"updated": list(vals.keys())}
+
+
+def upload_permit_scan(hr_employee_id: int, datas_b64: str) -> dict:
+    """Dépose le scan du permis de séjour sur la fiche employé (champ has_work_permit)."""
+    get_write_client().execute_kw(
+        "hr.employee", "write", [[hr_employee_id], {"has_work_permit": _strip_data_url(datas_b64)}])
+    return {"ok": True}
+
+
+def list_countries() -> list[dict]:
+    ro = get_client()
+    return ro.execute_kw("res.country", "search_read", [[]], {"fields": ["name"], "order": "name"})
+
+
+# --- Notifications (poll Odoo) & PIN ---------------------------------------
+
+def set_employee_pin(hr_employee_id: int, pin: str) -> dict:
+    """Écrit le PIN dans hr.employee.pin (Odoo = référence du code, kiosque/app)."""
+    get_write_client().execute_kw("hr.employee", "write", [[hr_employee_id], {"pin": pin}])
+    return {"ok": True}
+
+
+def poll_events(hr_employee_id: int, since_utc: str) -> list[dict]:
+    """Événements Odoo depuis `since_utc` (UTC 'YYYY-MM-DD HH:MM:SS') : congés
+    validés/refusés + planning créé/modifié pour l'employé. Lecture seule."""
+    ro = get_client()
+    events = []
+
+    leaves = ro.execute_kw(
+        "hr.leave", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["state", "in", ["validate", "refuse"]],
+          ["write_date", ">", since_utc]]],
+        {"fields": ["id", "state", "write_date", "work_entry_type_id",
+                    "request_date_from", "request_date_to"]},
+    )
+    for l in leaves:
+        approved = l["state"] == "validate"
+        _, label = _friendly_leave(l["work_entry_type_id"][1] if l.get("work_entry_type_id") else None)
+        events.append({
+            "type": "leave_approved" if approved else "leave_refused",
+            "cat": "leave",
+            "title": "Congé validé" if approved else "Congé refusé",
+            "body": f"{label} · {l['request_date_from']} → {l['request_date_to']}",
+            "dedup_key": f"leave-{l['id']}-{l['state']}-{l['write_date']}",
+            "occurred_at": l["write_date"],
+        })
+
+    slots = ro.execute_kw(
+        "planning.slot", "search_read",
+        [[["employee_ids", "in", [hr_employee_id]], ["write_date", ">", since_utc]] + _company_domain()],
+        {"fields": _SLOT_FIELDS + ["write_date", "create_date"]},
+    )
+    for s in slots:
+        is_new = s.get("create_date") == s.get("write_date")
+        when = ""
+        if s.get("start_datetime"):
+            when = _parse_odoo_dt(s["start_datetime"]).astimezone(TZ).strftime("%d.%m à %H:%M")
+        events.append({
+            "type": "planning_new" if is_new else "planning_updated",
+            "cat": "planning",
+            "title": "Nouvelle intervention" if is_new else "Planning mis à jour",
+            "body": f"{_slot_label(s)}{' · ' + when if when else ''}",
+            "dedup_key": f"slot-{s['id']}-{s['write_date']}",
+            "occurred_at": s["write_date"],
+        })
+    return events
+
+
+# --- Notes de frais (hr.expense) -------------------------------------------
+# Catégories = product.product can_be_expensed ; TVA = account.tax achat (CH 2024+).
+# Montant saisi = TTC (Odoo recalcule HT + TVA). Créé en brouillon, mode « à rembourser ».
+EXPENSE_CCY = 4  # CHF
+EXPENSE_CATEGORIES = [
+    {"id": 2536, "name": "Matériel"},
+    {"id": 9, "name": "Repas"},
+    {"id": 10, "name": "Déplacement / logement"},
+    {"id": 11, "name": "Kilomètres"},
+    {"id": 13, "name": "Communication"},
+    {"id": 12, "name": "Cadeaux"},
+]
+EXPENSE_TAXES = [
+    {"id": 153, "name": "TVA 8.1 %", "rate": 8.1},
+    {"id": 147, "name": "TVA 2.6 %", "rate": 2.6},
+    {"id": 150, "name": "TVA 3.8 %", "rate": 3.8},
+    {"id": 138, "name": "Sans TVA", "rate": 0.0},
+]
+_EXPENSE_STATE_FR = {
+    "draft": "Brouillon", "reported": "Soumise", "submitted": "Soumise",
+    "approved": "Approuvée", "posted": "Comptabilisée", "done": "Payée",
+    "in_payment": "En paiement", "paid": "Payée", "refused": "Refusée",
+}
+
+
+def expense_options() -> dict:
+    return {"categories": EXPENSE_CATEGORIES, "taxes": EXPENSE_TAXES}
+
+
+def create_expense(hr_employee_id: int, name: str, amount: float, category_id: int | None,
+                   tax_id: int | None, date: str | None, description: str | None,
+                   photos: list[str] | None = None) -> dict:
+    """Crée une note de frais (hr.expense) en BROUILLON pour l'employé. Montant = TTC."""
+    rw = get_write_client()
+    vals = {
+        "employee_id": hr_employee_id,
+        "company_id": settings.company_id,
+        "currency_id": EXPENSE_CCY,
+        "name": (name or "").strip() or "Note de frais",
+        "price_unit": float(amount),
+        "quantity": 1.0,
+        "payment_mode": "own_account",
+    }
+    if category_id:
+        vals["product_id"] = int(category_id)
+    if tax_id:
+        vals["tax_ids"] = [(6, 0, [int(tax_id)])]
+    if date:
+        vals["date"] = date
+    if description:
+        vals["description"] = description
+    exp_id = rw.execute_kw("hr.expense", "create", [vals])
+
+    main_att = None
+    for i, photo in enumerate(photos or []):
+        aid = rw.execute_kw("ir.attachment", "create", [{
+            "name": f"recu_{i + 1}.jpg", "datas": _strip_data_url(photo),
+            "res_model": "hr.expense", "res_id": exp_id, "mimetype": "image/jpeg",
+        }])
+        if main_att is None:
+            main_att = aid
+    if main_att:
+        try:
+            rw.execute_kw("hr.expense", "write", [[exp_id], {"message_main_attachment_id": main_att}])
+        except Exception:
+            pass
+    return {"id": exp_id}
+
+
+def my_expenses(hr_employee_id: int, limit: int = 40) -> list[dict]:
+    ro = get_client()
+    rows = ro.execute_kw(
+        "hr.expense", "search_read", [[["employee_id", "=", hr_employee_id]]],
+        {"fields": ["name", "date", "total_amount_currency", "tax_amount_currency",
+                    "product_id", "state"], "order": "date desc, id desc", "limit": limit},
+    )
+    for r in rows:
+        r["state_label"] = _EXPENSE_STATE_FR.get(r.get("state"), r.get("state") or "")
+        r["category"] = r["product_id"][1] if r.get("product_id") else ""
+        r["amount"] = r.get("total_amount_currency") or 0.0
+    return rows
+
+
+def upload_medical_document(hr_employee_id: int, filename: str, datas_b64: str, mimetype: str) -> dict | None:
+    """Dépose un certificat médical dans le dossier « Maladie » de l'employé."""
+    root, folders = _employee_folder_tree(hr_employee_id)
+    if root is None:
+        return None
+    cf = _category_folder(folders, "maladie")
+    if not cf:
+        return None
+    rw = get_write_client()
+    doc_id = rw.execute_kw("documents.document", "create", [{
+        "type": "binary", "name": filename, "folder_id": cf,
+        "datas": _strip_data_url(datas_b64), "mimetype": mimetype or "application/octet-stream",
+    }])
+    return {"id": doc_id}

@@ -1,14 +1,15 @@
 // Écran de connexion : login + PIN, câblé sur l'API. Plein écran (hors shell).
 import { login, getMe, ApiError } from "../api.js";
 import { profile } from "../store.js";
+import { icon } from "../icons.js";
 
 export function renderLogin(root, onSuccess) {
   document.body.classList.add("screen-login");
   root.innerHTML = `
     <div class="login-wrap">
       <div class="login-logo">
-        <div style="font-size:2.4rem">🏊</div>
-        <strong style="font-size:1.2rem">Swiss Piscine</strong><br>
+        <div style="width:56px;height:56px;border-radius:15px;margin:0 auto 12px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#fff">${icon("wave", "icon-lg")}</div>
+        <strong style="font-size:1.25rem;color:#fff">Swiss Piscine</strong><br>
         <span style="opacity:.8;font-size:.9rem">Espace équipe</span>
       </div>
       <form class="login-card" id="login-form" novalidate>

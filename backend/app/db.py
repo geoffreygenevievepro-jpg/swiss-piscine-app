@@ -28,6 +28,33 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
     created_at  TEXT NOT NULL,
     FOREIGN KEY (employee_id) REFERENCES employees(id)
 );
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    hr_employee_id  INTEGER NOT NULL,
+    type            TEXT NOT NULL,
+    title           TEXT NOT NULL,
+    body            TEXT,
+    dedup_key       TEXT,
+    occurred_at     TEXT,
+    created_at      TEXT NOT NULL,
+    read_at         TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_dedup ON notifications(hr_employee_id, dedup_key);
+CREATE INDEX IF NOT EXISTS idx_notif_emp ON notifications(hr_employee_id);
+
+CREATE TABLE IF NOT EXISTS notif_state (
+    hr_employee_id  INTEGER PRIMARY KEY,
+    last_poll       TEXT,
+    prefs           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS announcement (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    text        TEXT,
+    author      TEXT,
+    updated_at  TEXT
+);
 """
 
 
@@ -81,6 +108,72 @@ def upsert_employee(hr_employee_id: int, login: str, name: str, role: str, pin_h
             """,
             (hr_employee_id, login, name, role, pin_hash, _utcnow_iso()),
         )
+
+
+def update_pin(emp_id: int, pin_hash: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE employees SET pin_hash = ? WHERE id = ?", (pin_hash, emp_id))
+
+
+# --- Notifications ---------------------------------------------------------
+
+def get_notif_state(hr_id: int) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM notif_state WHERE hr_employee_id = ?", (hr_id,)).fetchone()
+
+
+def set_notif_cursor(hr_id: int, ts: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO notif_state (hr_employee_id, last_poll) VALUES (?, ?) "
+            "ON CONFLICT(hr_employee_id) DO UPDATE SET last_poll = excluded.last_poll", (hr_id, ts))
+
+
+def set_notif_prefs(hr_id: int, prefs_json: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO notif_state (hr_employee_id, prefs) VALUES (?, ?) "
+            "ON CONFLICT(hr_employee_id) DO UPDATE SET prefs = excluded.prefs", (hr_id, prefs_json))
+
+
+def insert_notification(hr_id: int, type_: str, title: str, body: str, dedup_key: str, occurred_at: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO notifications (hr_employee_id, type, title, body, dedup_key, occurred_at, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)", (hr_id, type_, title, body, dedup_key, occurred_at, _utcnow_iso()))
+
+
+def list_notifications(hr_id: int, limit: int = 40) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, type, title, body, occurred_at, read_at FROM notifications "
+            "WHERE hr_employee_id = ? ORDER BY id DESC LIMIT ?", (hr_id, limit)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_unread(hr_id: int) -> int:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM notifications WHERE hr_employee_id = ? AND read_at IS NULL", (hr_id,)).fetchone()[0]
+
+
+def get_announcement() -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute("SELECT text, author, updated_at FROM announcement WHERE id = 1").fetchone()
+
+
+def set_announcement(text: str, author: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO announcement (id, text, author, updated_at) VALUES (1, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET text = excluded.text, author = excluded.author, updated_at = excluded.updated_at",
+            (text, author, _utcnow_iso()))
+
+
+def mark_all_read(hr_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE notifications SET read_at = ? WHERE hr_employee_id = ? AND read_at IS NULL",
+                     (_utcnow_iso(), hr_id))
 
 
 def register_failed_attempt(emp_id: int, locked_until_iso: str | None) -> None:
