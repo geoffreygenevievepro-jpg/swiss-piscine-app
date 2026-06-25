@@ -1,7 +1,7 @@
 """Endpoints Admin : vue d'ensemble équipe (heures par employé, tous les congés)."""
 from fastapi import APIRouter, Depends, HTTPException
 
-from .. import odoo
+from .. import db, odoo
 from ..deps import get_current_employee
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -21,3 +21,12 @@ def employees_hours(emp=Depends(require_admin)):
 @router.get("/leaves")
 def all_leaves(emp=Depends(require_admin)):
     return odoo.admin_leaves()
+
+
+@router.post("/employees/{emp_id}/reset-2fa")
+def reset_2fa(emp_id: int, _=Depends(require_admin)):
+    if db.get_employee_by_id(emp_id) is None:
+        raise HTTPException(404, "Employé introuvable")
+    db.reset_twofa(emp_id)
+    db.revoke_trusted_devices(emp_id)
+    return {"ok": True}
