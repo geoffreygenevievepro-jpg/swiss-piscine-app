@@ -20,10 +20,20 @@ import { admin } from "./screens/admin.js";
 
 const SCREENS = [accueil, pointer, terrain, planning, conges, notesfrais, documents, moi, admin];
 
-// Écrans visibles selon le rôle (Admin réservé au rôle admin).
+// Écrans contrôlables (activables/désactivables par société/employé depuis vue.heiwa).
+// Accueil/Pointer/Moi sont toujours visibles ; Admin reste réservé au rôle admin.
+const CONTROLLABLE_TABS = ["terrain", "planning", "conges", "notesfrais", "documents"];
+
+// Écrans visibles selon le rôle + les droits App RH (effective_tabs renvoyés par /me).
 function navScreens() {
-  const role = (profile.get() || {}).role;
-  return SCREENS.filter(s => s.id !== "admin" || role === "admin");
+  const me = profile.get() || {};
+  const role = me.role;
+  const eff = me.effective_tabs;           // array | undefined (vieux cache)
+  return SCREENS.filter(s => {
+    if (s.id === "admin") return role === "admin";
+    if (CONTROLLABLE_TABS.includes(s.id)) return !eff || eff.includes(s.id);  // fail-open si absent
+    return true;                            // accueil/pointer/moi/… toujours visibles
+  });
 }
 const root = document.getElementById("app");
 let current = accueil.id;

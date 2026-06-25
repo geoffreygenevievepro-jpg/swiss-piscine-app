@@ -2,7 +2,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import db, odoo
+from .. import db, odoo, supabase_access
+from ..config import settings
 from ..deps import get_current_employee
 from ..errors import odoo_unavailable
 from ..security import hash_pin, verify_pin
@@ -31,12 +32,18 @@ def me(emp=Depends(get_current_employee)):
         # L'app reste utilisable même si Odoo est momentanément injoignable.
         odoo_profile = None
 
+    # Onglets contrôlables visibles pour cet employé (droits App RH, vue.heiwa).
+    effective_tabs = supabase_access.access_decision(
+        emp["hr_employee_id"], settings.company_id
+    )["effective_tabs"]
+
     return {
         "id": emp["id"],
         "login": emp["login"],
         "name": emp["name"],
         "role": emp["role"],
         "hr_employee_id": emp["hr_employee_id"],
+        "effective_tabs": effective_tabs,
         "odoo": odoo_profile,
         "avatar": extra.get("avatar"),
         "activity_rate": extra.get("activity_rate"),

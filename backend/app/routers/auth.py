@@ -5,7 +5,7 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from .. import db
+from .. import db, supabase_access
 from ..config import settings
 from ..deps import get_current_employee
 from ..security import (
@@ -76,6 +76,15 @@ def login(body: LoginRequest):
         raise invalid
 
     db.reset_failed_attempts(emp["id"])
+
+    # Gate d'accès App RH (piloté depuis vue.heiwa). Fail-open : on refuse
+    # uniquement si l'accès est explicitement désactivé côté Supabase.
+    if not supabase_access.access_decision(emp["hr_employee_id"], settings.company_id)["allowed"]:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Accès suspendu — contactez l'administration RH",
+        )
+
     return _issue_tokens(emp["id"], emp["login"], emp["role"])
 
 

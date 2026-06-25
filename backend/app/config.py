@@ -23,7 +23,12 @@ def _load_or_create_secret() -> str:
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="APP_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="APP_",
+        env_file=str(BACKEND_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     app_name: str = "App Équipe Swiss Piscine"
     # Société Odoo : Swiss Piscine UNIQUEMENT
@@ -49,6 +54,10 @@ class Settings(BaseSettings):
 
     # SQLite (comptes employés + refresh tokens)
     db_path: str = str(BACKEND_DIR / "data" / "app.db")
+
+    # Supabase (lecture seule des droits d'accès App RH, pilotés depuis vue.heiwa)
+    supabase_url: str = ""
+    supabase_key: str = ""
 
     def resolved_jwt_secret(self) -> str:
         return self.jwt_secret or _load_or_create_secret()
