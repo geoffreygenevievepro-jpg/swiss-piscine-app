@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import db
 from .config import settings
 from .routers import (admin, announcement, attendance, auth, documents, expenses,
-                      interventions, manager, me, notifications, rh, week)
+                      interventions, manager, me, notifications, rh, twofa, week)
 
 
 @asynccontextmanager
@@ -44,3 +44,4 @@ app.include_router(expenses.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
 app.include_router(announcement.router)
+app.include_router(twofa.router)

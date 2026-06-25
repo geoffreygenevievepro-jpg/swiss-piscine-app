@@ -254,6 +254,12 @@ def set_twofa(emp_id: int, method: str, secret_encrypted: str | None) -> None:
             (method, secret_encrypted, emp_id))
 
 
+def stage_twofa_secret(emp_id: int, secret_encrypted: str) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE employees SET twofa_secret_encrypted = ?, twofa_enabled = 0 WHERE id = ?",
+                     (secret_encrypted, emp_id))
+
+
 def reset_twofa(emp_id: int) -> None:
     with get_conn() as conn:
         conn.execute(
