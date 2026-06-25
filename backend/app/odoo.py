@@ -1840,3 +1840,19 @@ def upload_medical_document(hr_employee_id: int, filename: str, datas_b64: str, 
         "datas": _strip_data_url(datas_b64), "mimetype": mimetype or "application/octet-stream",
     }])
     return {"id": doc_id}
+
+
+def send_email(to: str, subject: str, body_html: str) -> bool:
+    """Envoie un email transactionnel via Odoo (mail.mail). Best-effort."""
+    try:
+        rw = get_write_client()
+        mail_id = rw.execute_kw("mail.mail", "create", [{
+            "subject": subject,
+            "body_html": body_html,
+            "email_to": to,
+            "auto_delete": True,
+        }])
+        rw.execute_kw("mail.mail", "send", [[mail_id]])
+        return True
+    except Exception:
+        return False
