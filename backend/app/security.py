@@ -71,6 +71,18 @@ def create_refresh_token(employee_id: int) -> tuple[str, str, datetime]:
     return token, jti, expires_at
 
 
+PRE2FA_TTL_MIN = 5
+
+def create_pre2fa_token(employee_id: int) -> str:
+    payload = {
+        "sub": str(employee_id),
+        "type": "pre2fa",
+        "iat": _now(),
+        "exp": _now() + timedelta(minutes=PRE2FA_TTL_MIN),
+    }
+    return jwt.encode(payload, settings.resolved_jwt_secret(), algorithm=settings.jwt_algorithm)
+
+
 def decode_token(token: str) -> dict:
     """Décode et valide un JWT. Lève jwt.PyJWTError si invalide/expiré."""
     return jwt.decode(token, settings.resolved_jwt_secret(), algorithms=[settings.jwt_algorithm])

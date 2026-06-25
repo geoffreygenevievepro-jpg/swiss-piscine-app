@@ -29,3 +29,21 @@ def get_current_employee(
     if emp is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Compte introuvable ou inactif")
     return emp
+
+
+def get_pre2fa_employee(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+):
+    """Valide un token pré-2FA et renvoie la ligne employee. Refuse tout autre type."""
+    if creds is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token manquant")
+    try:
+        payload = decode_token(creds.credentials)
+    except jwt.PyJWTError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token invalide")
+    if payload.get("type") != "pre2fa":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token pré-2FA requis")
+    emp = db.get_employee_by_id(int(payload["sub"]))
+    if emp is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Compte introuvable")
+    return emp
