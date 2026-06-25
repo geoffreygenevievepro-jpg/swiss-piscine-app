@@ -8,14 +8,20 @@ class ApiError extends Error {
 }
 export { ApiError };
 
-async function rawFetch(path, { method = "GET", body, auth = true } = {}) {
+async function rawFetch(path, { method = "GET", body, auth = true, bearer, credentials } = {}) {
   const headers = { "Content-Type": "application/json" };
-  if (auth && tokens.access) headers["Authorization"] = "Bearer " + tokens.access;
-  const res = await fetch(API_BASE + path, {
+  if (bearer) {
+    headers["Authorization"] = "Bearer " + bearer;
+  } else if (auth && tokens.access) {
+    headers["Authorization"] = "Bearer " + tokens.access;
+  }
+  const fetchOpts = {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+  if (credentials) fetchOpts.credentials = credentials;
+  const res = await fetch(API_BASE + path, fetchOpts);
   return res;
 }
 
@@ -50,11 +56,15 @@ function authExpired() {
 }
 
 // Appel authentifié : refresh transparent sur 401, repli sur le cache hors-ligne.
+// opts.bearer  : token explicite (ex. pending_token pour /2fa/*) — désactive le refresh auto.
+// opts.credentials : valeur fetch credentials ("include" pour poser le cookie d'appareil).
 export async function api(path, opts = {}) {
   const isGet = !opts.method || opts.method === "GET";
+  // Si un bearer explicite est fourni, on ne tente pas le refresh automatique.
+  const skipRefresh = !!opts.bearer;
   try {
     let res = await rawFetch(path, opts);
-    if (res.status === 401 && opts.auth !== false) {
+    if (res.status === 401 && opts.auth !== false && !skipRefresh) {
       if (await tryRefresh()) {
         res = await rawFetch(path, opts);
       } else {
@@ -82,6 +92,10 @@ export async function api(path, opts = {}) {
 }
 
 // --- Auth ---
+// Retourne le corps brut de /auth/login.
+// Si la réponse contient twofa_required ou twofa_setup_required, l'appelant doit
+// prendre en charge la flow 2FA (voir screens/login.js).
+// Si c'est un token normal, l'appelant doit appeler tokens.set().
 export async function login(loginName, pin) {
   const res = await rawFetch("/auth/login", {
     method: "POST",
@@ -93,7 +107,7 @@ export async function login(loginName, pin) {
     try { detail = (await res.json()).detail || detail; } catch {}
     throw new ApiError(detail, res.status);
   }
-  tokens.set(await res.json());
+  return await res.json();
 }
 
 export async function logout() {

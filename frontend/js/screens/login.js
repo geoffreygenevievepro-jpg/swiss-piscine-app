@@ -1,7 +1,8 @@
 // Écran de connexion : login + PIN, câblé sur l'API. Plein écran (hors shell).
 import { login, getMe, ApiError } from "../api.js";
-import { profile } from "../store.js";
+import { profile, tokens } from "../store.js";
 import { icon } from "../icons.js";
+import { mountTwofa } from "./twofa.js";
 
 export function renderLogin(root, onSuccess) {
   document.body.classList.add("screen-login");
@@ -46,7 +47,26 @@ export function renderLogin(root, onSuccess) {
     btn.disabled = true;
     btn.innerHTML = `<span class="spinner"></span>`;
     try {
-      await login(loginName, pin);
+      const data = await login(loginName, pin);
+
+      if (data.twofa_setup_required || data.twofa_required) {
+        // Passer à l'écran 2FA : le pending_token autorise uniquement les routes /2fa/*.
+        document.body.classList.remove("screen-login");
+        const mode = data.twofa_setup_required ? "setup" : "verify";
+        mountTwofa(root, {
+          mode,
+          pendingToken: data.pending_token,
+          onDone: async (tokenResponse) => {
+            tokens.set(tokenResponse);
+            profile.set(await getMe());
+            onSuccess();
+          },
+        });
+        return;
+      }
+
+      // Connexion directe (pas de 2FA configuré ou appareil de confiance).
+      tokens.set(data);
       profile.set(await getMe());
       document.body.classList.remove("screen-login");
       onSuccess();
