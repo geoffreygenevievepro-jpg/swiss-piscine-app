@@ -2,14 +2,15 @@
 from datetime import datetime, timezone
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from .. import db, supabase_access
+from .. import db, supabase_access, twofa
 from ..config import settings
 from ..deps import get_current_employee
 from ..security import (
     create_access_token,
+    create_pre2fa_token,
     create_refresh_token,
     decode_token,
     verify_pin,
@@ -49,8 +50,8 @@ def _issue_tokens(employee_id: int, login: str, role: str) -> TokenResponse:
     )
 
 
-@router.post("/login", response_model=TokenResponse)
-def login(body: LoginRequest):
+@router.post("/login", response_model=None)
+def login(body: LoginRequest, request: Request):
     emp = db.get_employee_by_login(body.login.strip().lower())
     # Réponse uniforme pour ne pas révéler l'existence d'un login.
     invalid = HTTPException(status.HTTP_401_UNAUTHORIZED, "Identifiant ou code PIN incorrect")
@@ -84,6 +85,16 @@ def login(body: LoginRequest):
             status.HTTP_403_FORBIDDEN,
             "Accès suspendu — contactez l'administration RH",
         )
+
+    # 2FA : si l'appareil n'est pas de confiance, exiger le 2e facteur.
+    trust = request.cookies.get("sp_trust")
+    trusted = bool(trust) and db.is_device_trusted(
+        emp["id"], twofa.hash_token(trust), datetime.now(timezone.utc).isoformat())
+    if not trusted:
+        pending = create_pre2fa_token(emp["id"])
+        if emp["twofa_enabled"]:
+            return {"twofa_required": True, "pending_token": pending}
+        return {"twofa_setup_required": True, "pending_token": pending}
 
     return _issue_tokens(emp["id"], emp["login"], emp["role"])
 
