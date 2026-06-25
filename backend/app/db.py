@@ -55,6 +55,24 @@ CREATE TABLE IF NOT EXISTS announcement (
     author      TEXT,
     updated_at  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS trusted_devices (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id INTEGER NOT NULL,
+    token_hash  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    user_agent  TEXT,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trusted_emp ON trusted_devices(employee_id);
+
+CREATE TABLE IF NOT EXISTS email_otps (
+    employee_id INTEGER PRIMARY KEY,
+    code_hash   TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
 """
 
 
@@ -66,6 +84,16 @@ def init_db() -> None:
     Path(settings.db_path).parent.mkdir(parents=True, exist_ok=True)
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Colonnes 2FA ajoutées aux installations existantes (ALTER idempotent).
+        for ddl in (
+            "ALTER TABLE employees ADD COLUMN twofa_method TEXT",
+            "ALTER TABLE employees ADD COLUMN twofa_secret_encrypted TEXT",
+            "ALTER TABLE employees ADD COLUMN twofa_enabled INTEGER NOT NULL DEFAULT 0",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # colonne déjà présente
 
 
 @contextmanager
@@ -215,3 +243,75 @@ def revoke_refresh_token(jti: str) -> None:
 def revoke_all_for_employee(employee_id: int) -> None:
     with get_conn() as conn:
         conn.execute("UPDATE refresh_tokens SET revoked = 1 WHERE employee_id = ?", (employee_id,))
+
+
+# --- 2FA : Authentification multi-facteurs ------------------------------------
+
+def set_twofa(emp_id: int, method: str, secret_encrypted: str | None) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE employees SET twofa_method = ?, twofa_secret_encrypted = ?, twofa_enabled = 1 WHERE id = ?",
+            (method, secret_encrypted, emp_id))
+
+
+def reset_twofa(emp_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE employees SET twofa_method = NULL, twofa_secret_encrypted = NULL, twofa_enabled = 0 WHERE id = ?",
+            (emp_id,))
+
+
+# --- Appareils de confiance ---
+
+def add_trusted_device(employee_id: int, token_hash: str, expires_at_iso: str, user_agent: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO trusted_devices (employee_id, token_hash, expires_at, user_agent, created_at) "
+            "VALUES (?, ?, ?, ?, ?)", (employee_id, token_hash, expires_at_iso, user_agent, _utcnow_iso()))
+
+
+def is_device_trusted(employee_id: int, token_hash: str, now_iso: str) -> bool:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM trusted_devices WHERE employee_id = ? AND token_hash = ? AND expires_at > ? LIMIT 1",
+            (employee_id, token_hash, now_iso)).fetchone()
+        return row is not None
+
+
+def revoke_trusted_devices(employee_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM trusted_devices WHERE employee_id = ?", (employee_id,))
+
+
+# --- Codes OTP email ---
+
+def create_email_otp(employee_id: int, code_hash: str, expires_at_iso: str) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO email_otps (employee_id, code_hash, expires_at, attempts, created_at) "
+            "VALUES (?, ?, ?, 0, ?) "
+            "ON CONFLICT(employee_id) DO UPDATE SET code_hash=excluded.code_hash, "
+            "expires_at=excluded.expires_at, attempts=0, created_at=excluded.created_at",
+            (employee_id, code_hash, expires_at_iso, _utcnow_iso()))
+
+
+def get_email_otp(employee_id: int) -> sqlite3.Row | None:
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM email_otps WHERE employee_id = ?", (employee_id,)).fetchone()
+
+
+def bump_email_otp_attempts(employee_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("UPDATE email_otps SET attempts = attempts + 1 WHERE employee_id = ?", (employee_id,))
+
+
+def delete_email_otp(employee_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM email_otps WHERE employee_id = ?", (employee_id,))
+
+
+def count_recent_email_otps(employee_id: int, since_iso: str) -> int:
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM email_otps WHERE employee_id = ? AND created_at >= ?",
+            (employee_id, since_iso)).fetchone()[0]

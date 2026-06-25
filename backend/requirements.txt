@@ -7,4 +7,6 @@ pydantic-settings>=2.14
 python-multipart>=0.0.29
 python-dotenv>=1.0
 requests>=2.31
+pyotp>=2.9
+cryptography>=42.0
 # Le hash des PIN utilise hashlib (stdlib) — aucune lib crypto externe requise.
