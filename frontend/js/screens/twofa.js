@@ -5,204 +5,20 @@
 import { api, ApiError } from "../api.js";
 
 // ---------------------------------------------------------------------------
-// QR Code generator — pur JS, auto-contenu (aucun service externe).
-// Implémentation simplifiée Mode Byte, masque 0, version auto (1-10).
-// Suffisant pour les URI otpauth (< 160 chars courants).
+// QR Code — via la lib qrcode-generator (vendue dans js/vendor/qrcode.js,
+// exposée en global window.qrcode par index.html ; aucun service externe).
 // ---------------------------------------------------------------------------
-const QR = (() => {
-  // Tables GF(256) pour Reed-Solomon
-  const EXP = new Uint8Array(256);
-  const LOG = new Uint8Array(256);
-  (() => {
-    let x = 1;
-    for (let i = 0; i < 255; i++) {
-      EXP[i] = x; LOG[x] = i;
-      x = x << 1; if (x & 0x100) x ^= 0x11D;
-    }
-    EXP[255] = EXP[0];
-  })();
-  function gfMul(a, b) {
-    if (a === 0 || b === 0) return 0;
-    return EXP[(LOG[a] + LOG[b]) % 255];
+function qrSvgFor(text) {
+  try {
+    if (typeof window === "undefined" || !window.qrcode) return null;
+    const qr = window.qrcode(0, "M"); // 0 = version auto, M = correction moyenne
+    qr.addData(text);
+    qr.make();
+    return qr.createSvgTag({ cellSize: 4, margin: 4 });
+  } catch {
+    return null;
   }
-  function rsECC(data, nEcc) {
-    const gen = rsGenerator(nEcc);
-    const msg = [...data, ...new Array(nEcc).fill(0)];
-    for (let i = 0; i < data.length; i++) {
-      const coeff = msg[i];
-      if (coeff !== 0) for (let j = 0; j < gen.length; j++) msg[i + j] ^= gfMul(gen[j], coeff);
-    }
-    return msg.slice(data.length);
-  }
-  function rsGenerator(degree) {
-    let g = [1];
-    for (let i = 0; i < degree; i++) {
-      const ng = new Array(g.length + 1).fill(0);
-      for (let j = 0; j < g.length; j++) { ng[j] ^= g[j]; ng[j + 1] ^= gfMul(g[j], EXP[i]); }
-      g = ng;
-    }
-    return g;
-  }
-
-  // Caractéristiques par version (1-10) pour le niveau de correction M
-  const VERSION_INFO = [
-    null,
-    { size: 21, data: 16, ecc: 10, blocks: 1 },  // v1
-    { size: 25, data: 28, ecc: 16, blocks: 1 },  // v2
-    { size: 29, data: 44, ecc: 26, blocks: 1 },  // v3
-    { size: 33, data: 64, ecc: 18, blocks: 2 },  // v4  (2 blocs, simplifié)
-    { size: 37, data: 86, ecc: 24, blocks: 2 },  // v5
-    { size: 41, data: 108, ecc: 16, blocks: 4 }, // v6
-    { size: 45, data: 124, ecc: 18, blocks: 4 }, // v7
-    { size: 49, data: 154, ecc: 22, blocks: 2 }, // v8
-    { size: 53, data: 182, ecc: 22, blocks: 3 }, // v9
-    { size: 57, data: 216, ecc: 26, blocks: 4 }, // v10
-  ];
-
-  // Polynômes de format (niveau M, masque 0) pré-calculés selon spec QR
-  // format info pour masque 0 niveau M = 101010000010010 XOR 101010101010101 = ...
-  // On n'a pas besoin de les calculer ici : on les encode directement dans les bits.
-  const FORMAT_INFO_M_MASK0 = [1,0,1,0,1,0,0,0,0,0,1,0,0,1,0]; // 15 bits
-
-  function encodeData(text) {
-    const bytes = new TextEncoder().encode(text);
-    const dataLen = bytes.length;
-    // Mode Byte (0100) + longueur (8 bits) + données + terminateur
-    const bits = [];
-    const pushBits = (val, n) => { for (let i = n - 1; i >= 0; i--) bits.push((val >> i) & 1); };
-    pushBits(0b0100, 4); // mode byte
-    pushBits(dataLen, 8);
-    for (const b of bytes) pushBits(b, 8);
-    return { bits, dataLen };
-  }
-
-  function buildMatrix(version) {
-    const sz = VERSION_INFO[version].size;
-    // null = libre, true = foncé, false = clair
-    const m = Array.from({ length: sz }, () => new Array(sz).fill(null));
-    // Finder patterns
-    const finder = (r, c) => {
-      for (let dr = -1; dr <= 7; dr++) for (let dc = -1; dc <= 7; dc++) {
-        const rr = r + dr, cc = c + dc;
-        if (rr < 0 || rr >= sz || cc < 0 || cc >= sz) continue;
-        const inSquare = dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6;
-        const onBorder = dr === 0 || dr === 6 || dc === 0 || dc === 6;
-        const inInner = dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4;
-        m[rr][cc] = inSquare ? (onBorder || inInner) : false;
-      }
-    };
-    finder(0, 0); finder(0, sz - 7); finder(sz - 7, 0);
-    // Timing patterns
-    for (let i = 8; i < sz - 8; i++) { m[6][i] = i % 2 === 0; m[i][6] = i % 2 === 0; }
-    // Dark module
-    m[4 * version + 9][8] = true;
-    return m;
-  }
-
-  function placeFormatInfo(m, sz) {
-    const fi = FORMAT_INFO_M_MASK0;
-    // Autour du finder TL (rangée 8 et colonne 8)
-    const pos = [0,1,2,3,4,5,7,8]; // skip 6 (timing)
-    // Colonne 8 (bits 0..7) de haut en bas
-    for (let i = 0; i < 6; i++) m[i][8] = !!fi[i];
-    m[7][8] = !!fi[6];
-    m[8][8] = !!fi[7];
-    // Rangée 8 (bits 8..14) de droite à gauche depuis colonne 7
-    for (let i = 0; i < 7; i++) m[8][7 - i] = !!fi[8 + i];
-    // Copie dans finder TR et BL
-    for (let i = 0; i < 7; i++) m[8][sz - 7 + i] = !!fi[i];
-    for (let i = 0; i < 8; i++) m[sz - 8 + i][8] = !!fi[7 + i];
-  }
-
-  function placeDataBits(m, sz, dataBits) {
-    // Placement des données en zig-zag de droite à gauche en bas en haut
-    let bitIdx = 0;
-    let dir = -1; // -1 = montée, 1 = descente
-    let row = sz - 1;
-    for (let col = sz - 1; col >= 1; col -= 2) {
-      if (col === 6) col--; // sauter colonne timing
-      for (let r = row; dir === -1 ? r >= 0 : r < sz; r += dir) {
-        for (let dc = 0; dc < 2; dc++) {
-          const c = col - dc;
-          if (m[r][c] !== null) continue; // module réservé
-          const bit = bitIdx < dataBits.length ? dataBits[bitIdx++] : 0;
-          // Masque 0 : (r + c) % 2 === 0 → inverser
-          m[r][c] = ((r + c) % 2 === 0) ? !bit : !!bit;
-        }
-      }
-      row = dir === -1 ? 0 : sz - 1;
-      dir = -dir;
-    }
-  }
-
-  // Génère un SVG QR code pour le texte donné
-  function generate(text, cellPx = 4) {
-    const { bits, dataLen } = encodeData(text);
-    // Choisir la version minimale
-    let version = null;
-    for (let v = 1; v <= 10; v++) {
-      if (dataLen <= VERSION_INFO[v].data) { version = v; break; }
-    }
-    if (!version) return null; // trop long (> ~216 octets)
-
-    const info = VERSION_INFO[version];
-    const sz = info.size;
-
-    // Compléter les bits jusqu'à capacité en octets
-    const totalBits = info.data * 8;
-    // Terminateur
-    for (let i = 0; i < 4 && bits.length < totalBits; i++) bits.push(0);
-    // Aligner à 8
-    while (bits.length % 8 !== 0) bits.push(0);
-    // Remplir avec les octets de rembourrage alternés
-    const PAD = [0xEC, 0x11];
-    let pi = 0;
-    while (bits.length < totalBits) {
-      const p = PAD[pi++ % 2];
-      for (let i = 7; i >= 0; i--) bits.push((p >> i) & 1);
-    }
-
-    // Convertir bits en octets de données
-    const dataBytes = [];
-    for (let i = 0; i < bits.length; i += 8) {
-      let b = 0;
-      for (let j = 0; j < 8; j++) b = (b << 1) | (bits[i + j] || 0);
-      dataBytes.push(b);
-    }
-
-    // ECC (simplifié : un seul bloc — acceptable pour v1-v3 ; pour v4+, multi-blocs)
-    // Pour la portée de cet usage (URI otpauth ~80-150 chars → v4-v5), on fait un seul bloc ECC
-    const eccBytes = rsECC(dataBytes, info.ecc);
-    const allBytes = [...dataBytes, ...eccBytes];
-
-    // Bits finaux
-    const allBits = [];
-    for (const byte of allBytes) for (let i = 7; i >= 0; i--) allBits.push((byte >> i) & 1);
-
-    // Construire la matrice
-    const m = buildMatrix(version);
-    placeDataBits(m, sz, allBits);
-    placeFormatInfo(m, sz);
-
-    // Rendu SVG (quiet zone 4 modules)
-    const quiet = 4;
-    const total = (sz + 2 * quiet) * cellPx;
-    const rects = [];
-    for (let r = 0; r < sz; r++) {
-      for (let c = 0; c < sz; c++) {
-        if (m[r][c]) {
-          rects.push(`<rect x="${(c + quiet) * cellPx}" y="${(r + quiet) * cellPx}" width="${cellPx}" height="${cellPx}"/>`);
-        }
-      }
-    }
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${total} ${total}" width="${total}" height="${total}" style="display:block;max-width:220px;height:auto">
-  <rect width="${total}" height="${total}" fill="#fff"/>
-  <g fill="#000">${rects.join("")}</g>
-</svg>`;
-  }
-
-  return { generate };
-})();
+}
 
 // ---------------------------------------------------------------------------
 // Helpers 2FA API
@@ -353,7 +169,7 @@ async function setupTotp(root, { pendingToken, onDone }) {
     return;
   }
 
-  const qrSvg = otpauthUri ? QR.generate(otpauthUri, 4) : null;
+  const qrSvg = otpauthUri ? qrSvgFor(otpauthUri) : null;
   const qrBlock = qrSvg
     ? `<div style="display:flex;justify-content:center;margin:12px 0">${qrSvg}</div>`
     : "";
