@@ -129,8 +129,8 @@ function quickActions(status) {
   const tile = (act, ic, bg, label) => `<button class="qa dash-act" data-act="${act}"><span class="qbadge ${bg}">${icon(ic)}</span><b>${label}</b></button>`;
   const isIn = status && status.state === "in";
   const timbrage = isIn
-    ? tile("entrer", "stop", "bg-coral", "Sortie (timbrage)")
-    : tile("entrer", "play", "bg-coral", "Entrer (timbrage)");
+    ? tile("entrer", "stop", "bg-red", "Sortie")
+    : tile("entrer", "play", "bg-green", "Entrer");
   return `<div class="card">
     <div class="eyebrow">Actions rapides</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
