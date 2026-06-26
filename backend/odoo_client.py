@@ -11,12 +11,57 @@ Features:
 import os
 import json
 import random
+import time
+import threading
 import requests
 import logging
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 from dotenv import load_dotenv
 from datetime import datetime
+
+# --- Cache de lecture court (anti rate-limit Odoo 429) ---------------------
+# Mémorise le résultat des lectures (search_read/read/search...) pendant un
+# court instant, partagé entre les clients RO/RW. Toute ÉCRITURE sur un modèle
+# invalide le cache de lecture de ce modèle → la fraîcheur du temps réel
+# (pointage, etc.) est préservée juste après une action de l'utilisateur.
+_READ_METHODS = {
+    "search_read", "read", "search", "search_count",
+    "read_group", "name_search", "name_get", "fields_get",
+}
+_CACHE_TTL = 20.0  # secondes
+_cache_lock = threading.Lock()
+_cache_store: dict = {}        # key -> (expires_at, result)
+_cache_model_keys: dict = {}   # model -> set(keys)
+
+
+def _cache_key(model, method, args, kwargs):
+    return (model, method,
+            json.dumps(args, default=str, sort_keys=True),
+            json.dumps(kwargs, default=str, sort_keys=True))
+
+
+def _cache_lookup(key):
+    now = time.time()
+    with _cache_lock:
+        ent = _cache_store.get(key)
+        if ent and ent[0] > now:
+            return True, ent[1]
+        if ent:
+            _cache_store.pop(key, None)
+    return False, None
+
+
+def _cache_put(model, key, result):
+    with _cache_lock:
+        _cache_store[key] = (time.time() + _CACHE_TTL, result)
+        _cache_model_keys.setdefault(model, set()).add(key)
+
+
+def _cache_invalidate(model):
+    with _cache_lock:
+        for k in _cache_model_keys.pop(model, ()):
+            _cache_store.pop(k, None)
 
 _SENSITIVE_FIELDS = {"email", "phone", "mobile", "street", "zip", "password", "name"}
 
@@ -124,30 +169,43 @@ class OdooClient:
         rpc_method = params.get("method", "unknown")
         logger.debug(f"RPC Call: {service}.{rpc_method}")
         
-        try:
-            response = self.session.post(
-                self.json_rpc_endpoint,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=30,
-            )
-            response.raise_for_status()
-            
+        # Jusqu'à 2 retries sur 429 (Odoo rate-limit) avec backoff court.
+        for attempt in range(3):
+            try:
+                response = self.session.post(
+                    self.json_rpc_endpoint,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30,
+                )
+            except requests.exceptions.RequestException as e:
+                logger.error(f"HTTP Error: {str(e)}")
+                raise Exception(f"HTTP Error: {str(e)}")
+
+            if response.status_code == 429 and attempt < 2:
+                time.sleep(0.5 * (attempt + 1))  # 0.5s puis 1.0s
+                continue
+
+            try:
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                logger.error(f"HTTP Error: {str(e)}")
+                raise Exception(f"HTTP Error: {str(e)}")
+
             result = response.json()
-            
+
             if "error" in result and result["error"] is not None:
                 error = result["error"]
                 error_message = error.get("message", "Unknown error")
                 error_data = error.get("data", {})
                 logger.error(f"RPC Error: {service}.{rpc_method} - {error_message}")
                 raise Exception(f"Odoo RPC Error: {error_message}\n{error_data}")
-            
+
             logger.debug(f"RPC Success: {service}.{rpc_method}")
             return result.get("result")
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP Error: {str(e)}")
-            raise Exception(f"HTTP Error: {str(e)}")
+
+        # 429 persistant après retries
+        raise Exception("HTTP Error: 429 Too Many Requests (Odoo, après retries)")
     
     def authenticate(self) -> int:
         """
@@ -214,14 +272,29 @@ class OdooClient:
         
         args = args or []
         kwargs = kwargs or {}
-        
+
+        # Lecture : servir depuis le cache court si disponible.
+        cache_key = None
+        if method in _READ_METHODS:
+            cache_key = _cache_key(model, method, args, kwargs)
+            hit, val = _cache_lookup(cache_key)
+            if hit:
+                return val
+
         params = {
             "service": "object",
             "method": "execute_kw",
             "args": [self.database, self.uid, self.password, model, method, args, kwargs],
         }
-        
-        return self._call("call", params)
+        result = self._call("call", params)
+
+        if method in _READ_METHODS:
+            _cache_put(model, cache_key, result)
+        else:
+            # Écriture (create/write/unlink/…) → invalider le cache de lecture
+            # de ce modèle pour garder la fraîcheur juste après l'action.
+            _cache_invalidate(model)
+        return result
     
     def search(
         self,
