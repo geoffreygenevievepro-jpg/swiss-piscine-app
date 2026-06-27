@@ -99,11 +99,10 @@ async function openReport(root, slotId) {
   let s;
   try { s = await api(`/interventions/${slotId}`); }
   catch { await load(root); toast("Intervention introuvable."); return; }
-  renderReport(
-    root,
-    { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids },
-    (msg) => { load(root); if (msg) toast(msg); },
-  );
+  renderReport(root, {
+    slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime },
+    onDone: () => semaine.render(root),
+  });
 }
 
 // --- Vue Liste : épurée, groupée par jour -----------------------------------

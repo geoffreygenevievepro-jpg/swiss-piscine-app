@@ -221,7 +221,7 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .qa { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; cursor: pointer; font-family: var(--font-body); text-align: left; }
 /* Bouton timbrage : pleine largeur, en haut, entièrement coloré. */
-.qa-timbrage { width: 100%; margin-top: 12px; justify-content: center; border: 0; color: #fff; font-weight: 700; font-size: 1.05rem; }
+.qa-timbrage { width: 100%; margin-top: 12px; justify-content: center; border: 0; color: #fff; font-weight: 700; font-size: 1.05rem; transition: background .15s ease; }
 .qa-timbrage .qbadge { background: rgba(255,255,255,.22); color: #fff; }
 .qa-in { background: var(--ok); }
 .qa-out { background: var(--danger); }
@@ -232,8 +232,16 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
 .vac-num { font-size: 1.95rem; font-weight: 800; line-height: 1; }
 .vac-unit { font-size: 1rem; font-weight: 600; opacity: .92; }
 .vac-lbl { font-size: .85rem; opacity: .95; margin-top: 3px; }
+/* Bandeau anniversaire (dégradé festif). */
+.bday-card { display: flex; align-items: center; gap: 14px; border: 0; background: linear-gradient(135deg, #7C4DFF, #FF5FA2); color: #fff; }
+.bday-ic { width: 46px; height: 46px; border-radius: 13px; background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.bday-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.bday-line { font-size: .98rem; }
+.bday-card strong { font-weight: 700; }
 .qa b { font-weight: 600; font-size: .95rem; color: var(--ink); }
 .qa:hover { border-color: var(--aqua); background: var(--aqua-soft); }
+/* Survol du bouton « Entrer » : vert un peu plus clair (pas le bleu générique). */
+.qa-timbrage.qa-in:hover { background: #3aa877; }
 
 /* --- Post-its pastel (Mes notes) --- */
 .postit-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 4px 20px; }

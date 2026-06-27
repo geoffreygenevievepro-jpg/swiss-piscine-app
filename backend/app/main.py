@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from . import db
 from .config import settings
-from .routers import (admin, announcement, attendance, auth, documents, expenses,
+from .routers import (admin, announcement, attendance, auth, birthdays, documents, expenses,
                       interventions, manager, me, notifications, rh, twofa, week)
 
 
@@ -45,3 +45,4 @@ app.include_router(notifications.router)
 app.include_router(admin.router)
 app.include_router(announcement.router)
 app.include_router(twofa.router)
+app.include_router(birthdays.router)

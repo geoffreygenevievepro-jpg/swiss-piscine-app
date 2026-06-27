@@ -10,7 +10,8 @@ export const conges = {
   id: "conges",
   label: "Mes congés",
   icon: "leaf",
-  async render(root) {
+  async render(root, ctx) {
+    if (ctx && ctx.intent === "new") { renderLeaveForm(root); return; }
     root.innerHTML = `<h2>Mes congés</h2><div class="placeholder"><div class="big">${icon("leaf")}</div>Chargement…</div>`;
     let balances, leaves;
     try {

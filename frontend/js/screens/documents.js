@@ -20,7 +20,8 @@ export const documents = {
   id: "documents",
   label: "Documents",
   icon: "doc",
-  async render(root) {
+  async render(root, ctx) {
+    if (ctx && ctx.intent === "payslips") view = "payslips";
     root.innerHTML = `<h2>Documents</h2><div id="doc-zone"><div class="placeholder"><div class="big">${icon("doc")}</div>Chargement…</div></div>`;
     const zone = root.querySelector("#doc-zone");
     const [payslips, docs] = await Promise.all([
