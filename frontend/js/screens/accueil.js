@@ -138,6 +138,7 @@ function quickActions(status) {
       ${tile("conges", "leaf", "bg-green", "Demande de congé")}
       ${tile("intervention", "tools", "bg-aqua", "Mon intervention")}
       ${tile("frais", "receipt", "bg-amber", "Créer une note de frais")}
+      ${tile("salaires", "doc", "bg-violet", "Mes salaires")}
     </div>
   </div>`;
 }
@@ -308,9 +309,10 @@ async function punchTimbrage(btn, nav) {
 function wire(dash, nav) {
   dash.querySelectorAll(".dash-act").forEach(b => b.addEventListener("click", () => {
     const a = b.dataset.act;
-    if (a === "conges") nav("conges");
-    else if (a === "intervention") nav("terrain");
-    else if (a === "frais") nav("notesfrais");
+    if (a === "conges") nav("conges", "new");
+    else if (a === "intervention") nav("terrain", "new");
+    else if (a === "frais") nav("notesfrais", "new");
+    else if (a === "salaires") nav("documents", "payslips");
     else if (a === "entrer") punchTimbrage(b, nav);
   }));
   dash.querySelectorAll(".dash-link").forEach(c => c.addEventListener("click", () => nav(c.dataset.nav)));

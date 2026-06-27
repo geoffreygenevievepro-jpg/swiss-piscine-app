@@ -31,7 +31,8 @@ export const terrain = {
   id: "terrain",
   label: "Rapport",
   icon: "tools",
-  async render(root) {
+  async render(root, ctx) {
+    if (ctx && ctx.intent === "new") { renderForm(root); return; }
     root.innerHTML = `${modeToggle()}<div id="t-content"></div>`;
     root.querySelectorAll("[data-mode]").forEach(b =>
       b.addEventListener("click", () => { mode = b.dataset.mode; terrain.render(root); }));

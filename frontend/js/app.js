@@ -38,8 +38,8 @@ function navScreens() {
 const root = document.getElementById("app");
 let current = accueil.id;
 
-function ctx() {
-  return { navigate: mountApp, logout: doLogout };
+function ctx(intent = null) {
+  return { navigate: mountApp, logout: doLogout, intent };
 }
 
 async function updateSyncBadge() {
@@ -64,7 +64,7 @@ async function flushOutbox() {
   updateSyncBadge();
 }
 
-function mountApp(screenId = current) {
+function mountApp(screenId = current, intent = null) {
   current = screenId;
   document.body.classList.remove("screen-login");
   const me = profile.get();
@@ -100,7 +100,7 @@ function mountApp(screenId = current) {
     </nav>`;
 
   const view = root.querySelector("#view");
-  SCREENS.find(s => s.id === current).render(view, ctx());
+  SCREENS.find(s => s.id === current).render(view, ctx(intent));
 
   root.querySelector("#tabbar").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-screen]");

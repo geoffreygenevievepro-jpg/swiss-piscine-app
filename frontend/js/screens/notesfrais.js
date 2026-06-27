@@ -30,9 +30,10 @@ export const notesfrais = {
   id: "notesfrais",
   label: "Notes de frais",
   icon: "receipt",
-  async render(root) {
+  async render(root, ctx) {
     root.innerHTML = `<h2>Notes de frais</h2><div id="nf-zone"><div class="placeholder"><div class="big">${icon("receipt")}</div>Chargement…</div></div>`;
     const zone = root.querySelector("#nf-zone");
+    if (ctx && ctx.intent === "new") { renderForm(root, zone); return; }
     let expenses = [];
     try { expenses = await api("/expenses"); } catch {}
     drawList(root, zone, expenses);
