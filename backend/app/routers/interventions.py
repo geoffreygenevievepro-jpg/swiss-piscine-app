@@ -14,6 +14,7 @@ class ProductLine(BaseModel):
     qty: float = 1.0
     price: float | None = None                   # prix unitaire (optionnel)
     product_id: int | None = None                # product.product Odoo (si choisi au catalogue)
+    billable: bool = False                       # ligne à facturer
 
 
 class NewIntervention(BaseModel):
@@ -35,6 +36,9 @@ class NewIntervention(BaseModel):
     materials: str | None = None                 # matériel utilisé (fiche de chantier)
     next_action: str | None = None               # rappel | appel | devis (prochaine action)
     next_action_date: str | None = None          # YYYY-MM-DD (échéance)
+    parts: list[str] = []                        # noms de TOUTES les lignes (worksheet « Pièces utilisées »)
+    resource_ids: list[int] = []                 # resource.resource (resource_id principal du slot)
+    remarques: str | None = None                 # champ libre worksheet « Remarques »
 
 
 class NewPartner(BaseModel):
@@ -59,6 +63,12 @@ class Report(BaseModel):
     worker_ids: list[int] = []        # employés ayant travaillé sur cette tâche
     next_action: str | None = None    # rappel | appel | devis | rien
     next_action_date: str | None = None  # YYYY-MM-DD (échéance de l'activité)
+    products: list[ProductLine] = []  # lignes « à facturer » (facture brouillon)
+    discount: float = 0.0             # remise globale % (facture)
+    vat_rate: float = 8.1             # TVA % (affichage)
+    status: str | None = None         # done | todo
+    remarques: str | None = None      # champ libre worksheet « Remarques »
+    resource_ids: list[int] = []      # resource.resource (réservé, non utilisé en mode slot)
 
 
 @router.get("/interventions/today")
@@ -97,6 +107,7 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
             worker_ids=body.worker_ids, materials=body.materials,
             next_action=body.next_action, next_action_date=body.next_action_date,
             schedule=f"{body.start_time} – {body.end_time}",
+            parts=body.parts, resource_ids=body.resource_ids, remarques=body.remarques,
         )
     except Exception as e:
         raise odoo_unavailable(e)
@@ -108,6 +119,13 @@ def employees(emp=Depends(get_current_employee)):
     """Liste des employés de la société de l'employé courant pour désigner qui a travaillé sur le chantier."""
     company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
     return [{"id": e["id"], "name": e["name"]} for e in odoo.list_employees(company_id)]
+
+
+@router.get("/resources")
+def resources(emp=Depends(get_current_employee)):
+    """Ressources planning de la société de l'employé courant (picker « Équipe »)."""
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.list_resources(company_id)
 
 
 @router.get("/partners/search")

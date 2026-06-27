@@ -100,6 +100,24 @@ def list_employees(company_id: int) -> list[dict]:
     )
 
 
+def list_resources(company_id: int) -> list[dict]:
+    """Ressources planning de la société (resource.resource humaines), mappées à
+    l'employé. Sert au picker « Équipe sur le chantier » : on garde resource_id
+    (planning) ET employee_id (worksheet/timesheet)."""
+    client = get_client()
+    rows = client.execute_kw(
+        "resource.resource", "search_read",
+        [[["company_id", "=", company_id], ["resource_type", "=", "user"]]],
+        {"fields": ["id", "name", "employee_id"], "order": "name"})
+    out = []
+    for r in rows:
+        emp = r.get("employee_id")
+        out.append({"resource_id": r["id"],
+                    "employee_id": emp[0] if emp else None,
+                    "name": r["name"]})
+    return out
+
+
 # --- Timbrage (hr.attendance) ---------------------------------------------
 
 def _open_attendance(hr_employee_id: int) -> dict | None:
@@ -631,7 +649,9 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
                         signature: str | None = None, status: str | None = None,
                         employee_name: str = "", worker_ids: list[int] | None = None,
                         materials: str | None = None, next_action: str | None = None,
-                        next_action_date: str | None = None, schedule: str | None = None) -> dict:
+                        next_action_date: str | None = None, schedule: str | None = None,
+                        parts: list[str] | None = None, resource_ids: list[int] | None = None,
+                        remarques: str | None = None) -> dict:
     """Crée un planning.slot (rôle Technicien, société de l'employé) + remplit la FICHE de chantier
     (worksheet) + note récap + pièces jointes (photos/signature) + facture brouillon si
     « à facturer ». Le client libre n'est créé que pour facturer."""
@@ -647,6 +667,9 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
         "role_id": ROLE_TECHNICIEN_ID,
         "name": label,
     }
+    rids = [int(r) for r in (resource_ids or [])]
+    if rids:
+        vals["resource_id"] = rids[0]
     if partner_id:
         vals["partner_id"] = partner_id
     rw = get_write_client()
@@ -709,11 +732,12 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
             "worker_names": worker_names,
             "notes": name,
             "materials": materials,
-            "parts": [p.get("name") for p in (products or []) if p.get("name")],
+            "parts": parts if parts is not None else [p.get("name") for p in (products or []) if p.get("name")],
             "tag_names": tag_names,
             "next_action": next_action,
             "next_action_date": next_action_date,
             "signature": signature,
+            "remarques": remarques,
         }
         slot_ctx = {"start_datetime": start_utc, "partner_id": [partner_id or 0, client_name or "Client"]}
         _fill_worksheet(get_client(), rw, slot_id, slot_ctx, report_like)
@@ -721,9 +745,10 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
     except Exception:
         worksheet_ok = False
 
-    # --- Facturation : facture client BROUILLON si tag « à facturer » + produits ---
+    # --- Facturation : facture client BROUILLON pour les lignes « à facturer » ---
+    # `products` reçues = déjà les lignes facturables (filtrées côté app).
     invoice_id = None
-    billable = bool(products) and any((n or "").lower() == "à facturer" for n in tag_names)
+    billable = bool(products)
     if billable:
         bill_partner = partner_id
         if not bill_partner and client_name:
@@ -1055,6 +1080,7 @@ def _fill_worksheet(ro, rw, slot_id: int, slot: dict, report: dict) -> None:
         "Pièces utilisées": ", ".join(parts) if parts else None,
         "Tags": ", ".join(report.get("tag_names") or []) or None,
         "Prochaine action": na_lbl,
+        "Remarques": report.get("remarques"),
     }
     for p in props:
         v = by_label.get(p.get("string"))
@@ -1167,9 +1193,26 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     except Exception:
         worksheet_ok = False
 
+    # Facture brouillon — lignes « à facturer » du rapport (additif). Le partner
+    # vient du créneau ; la société est celle de l'employé (déjà résolue).
+    invoice_id = None
+    products = report.get("products") or []
+    if products and slot.get("partner_id"):
+        try:
+            invoice_id = create_draft_invoice(
+                slot["partner_id"][0], products,
+                discount=float(report.get("discount") or 0.0),
+                origin=slot.get("name") or report.get("type"),
+                company_id=company_id)
+            rw.execute_kw("planning.slot", "message_post", [[slot_id]],
+                          {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
+        except Exception:
+            invoice_id = None
+
     return {"ok": True, "model": model, "res_id": rid,
             "attachments": len(att_ids), "timesheet": timesheet_ok,
-            "activity": activity_ok, "tags": tags_applied, "worksheet": worksheet_ok}
+            "activity": activity_ok, "tags": tags_applied, "worksheet": worksheet_ok,
+            "invoice": bool(invoice_id), "invoice_id": invoice_id}
 
 
 # --- RH : congés, soldes, fiches de salaire -------------------------------
