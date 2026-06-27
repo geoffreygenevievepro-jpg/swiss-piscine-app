@@ -14,7 +14,8 @@ def planning(offset: int = 0, emp=Depends(get_current_employee)):
 
 @router.get("/team")
 def team(offset: int = 0, emp=Depends(get_current_employee)):
-    return odoo.team_week(offset)
+    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.team_week(company_id, offset)
 
 
 @router.get("/upcoming")
@@ -24,4 +25,5 @@ def upcoming(days: int = 5, emp=Depends(get_current_employee)):
 
 @router.get("/holidays")
 def holidays(emp=Depends(get_current_employee)):
-    return odoo.upcoming_holidays()
+    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.upcoming_holidays(company_id)

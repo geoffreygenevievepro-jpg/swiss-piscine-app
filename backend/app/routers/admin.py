@@ -15,12 +15,14 @@ def require_admin(emp=Depends(get_current_employee)):
 
 @router.get("/employees-hours")
 def employees_hours(emp=Depends(require_admin)):
-    return odoo.admin_employees_hours()
+    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.admin_employees_hours(company_id)
 
 
 @router.get("/leaves")
 def all_leaves(emp=Depends(require_admin)):
-    return odoo.admin_leaves()
+    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.admin_leaves(company_id)
 
 
 @router.post("/employees/{emp_id}/reset-2fa")

@@ -92,10 +92,10 @@ def _employee_user_id(hr_employee_id: int) -> int | None:
     return uid[0] if uid else None
 
 
-def list_employees() -> list[dict]:
+def list_employees(company_id: int) -> list[dict]:
     client = get_client()
     return client.execute_kw(
-        "hr.employee", "search_read", [_company_domain()],
+        "hr.employee", "search_read", [_company_domain(company_id)],
         {"fields": ["name", "job_title", "work_email", "user_id"], "order": "name"},
     )
 
@@ -1325,8 +1325,8 @@ def upcoming_planning(hr_employee_id: int, days: int = 5) -> dict:
     return {"start": start_local.date().isoformat(), "days": days, "slots": slots}
 
 
-def team_week(offset: int = 0) -> dict:
-    """Grille équipe (company 5) : par employé, qui travaille / est absent chaque jour."""
+def team_week(company_id: int, offset: int = 0) -> dict:
+    """Grille équipe : par employé, qui travaille / est absent chaque jour."""
     monday, next_monday = _week_bounds(offset)
     start_utc = monday.astimezone(timezone.utc).strftime(ODOO_FMT)
     end_utc = next_monday.astimezone(timezone.utc).strftime(ODOO_FMT)
@@ -1336,7 +1336,7 @@ def team_week(offset: int = 0) -> dict:
     ro = get_client()
 
     employees = ro.execute_kw(
-        "hr.employee", "search_read", [_company_domain()],
+        "hr.employee", "search_read", [_company_domain(company_id)],
         {"fields": ["name"], "order": "name"},
     )
     members = {e["id"]: {"id": e["id"], "name": e["name"], "days": {d: {} for d in dates}}
@@ -1344,7 +1344,7 @@ def team_week(offset: int = 0) -> dict:
 
     slots = ro.execute_kw(
         "planning.slot", "search_read",
-        [[["start_datetime", ">=", start_utc], ["start_datetime", "<", end_utc]] + _company_domain()],
+        [[["start_datetime", ">=", start_utc], ["start_datetime", "<", end_utc]] + _company_domain(company_id)],
         {"fields": _SLOT_FIELDS + ["employee_ids"], "order": "start_datetime asc"},
     )
     for s in slots:
@@ -1358,7 +1358,7 @@ def team_week(offset: int = 0) -> dict:
 
     leaves = ro.execute_kw(
         "hr.leave", "search_read",
-        [[["employee_company_id", "=", settings.company_id],
+        [[["employee_company_id", "=", company_id],
           ["state", "in", ["validate", "validate1"]],
           ["request_date_from", "<=", week_to], ["request_date_to", ">=", week_from]]],
         {"fields": ["employee_id", "work_entry_type_id", "request_date_from", "request_date_to"]},
@@ -1375,14 +1375,14 @@ def team_week(offset: int = 0) -> dict:
     return {"week_start": week_from, "dates": dates, "members": list(members.values())}
 
 
-def upcoming_holidays(limit: int = 6) -> list[dict]:
-    """Prochains jours fériés (canton FR) de Swiss Piscine, depuis aujourd'hui.
+def upcoming_holidays(company_id: int, limit: int = 6) -> list[dict]:
+    """Prochains jours fériés depuis aujourd'hui pour la société donnée.
     Stockés dans resource.calendar.leaves (resource_id=False, préfixe « Férié FR — »)."""
     ro = get_client()
     cutoff = datetime.now(TZ).date().isoformat() + " 00:00:00"
     rows = ro.execute_kw(
         "resource.calendar.leaves", "search_read",
-        [[["company_id", "=", settings.company_id], ["resource_id", "=", False],
+        [[["company_id", "=", company_id], ["resource_id", "=", False],
           ["name", "like", "Férié FR"], ["date_from", ">=", cutoff]]],
         {"fields": ["name", "date_from"], "order": "date_from asc", "limit": limit},
     )
@@ -1438,11 +1438,11 @@ def leave_belongs_to_manager(leave_id: int, manager_hr_id: int) -> bool:
     return n > 0
 
 
-def pending_leaves(manager_hr_id: int | None = None) -> list[dict]:
-    """Demandes en attente (company 5). Si manager_hr_id : seulement son équipe
+def pending_leaves(company_id: int, manager_hr_id: int | None = None) -> list[dict]:
+    """Demandes en attente (société donnée). Si manager_hr_id : seulement son équipe
     (employés dont le supérieur = manager). Sinon (admin) : toutes."""
     ro = get_client()
-    domain = [["employee_company_id", "=", settings.company_id], ["state", "in", ["confirm", "validate1"]]]
+    domain = [["employee_company_id", "=", company_id], ["state", "in", ["confirm", "validate1"]]]
     if manager_hr_id:
         domain.append(["employee_id.parent_id", "=", manager_hr_id])
     leaves = ro.execute_kw(
@@ -1480,11 +1480,11 @@ def refuse_leave(leave_id: int) -> None:
 
 # --- Admin : vue d'ensemble équipe ------------------------------------------
 
-def admin_employees_hours() -> list[dict]:
-    """Par employé (société courante, actifs) : heures réalisées jour / semaine / mois / année."""
+def admin_employees_hours(company_id: int) -> list[dict]:
+    """Par employé (société donnée, actifs) : heures réalisées jour / semaine / mois / année."""
     ro = get_client()
     emps = ro.execute_kw(
-        "hr.employee", "search_read", [_company_domain() + [["active", "=", True]]],
+        "hr.employee", "search_read", [_company_domain(company_id) + [["active", "=", True]]],
         {"fields": ["name"], "order": "name"},
     )
     ids = [e["id"] for e in emps]
@@ -1519,12 +1519,12 @@ def admin_employees_hours() -> list[dict]:
     return [{"id": e["id"], "name": e["name"], **{k: round(v, 1) for k, v in agg[e["id"]].items()}} for e in emps]
 
 
-def admin_leaves() -> list[dict]:
-    """Toutes les demandes de congé (société courante) : en attente + validées, pour liste/calendrier."""
+def admin_leaves(company_id: int) -> list[dict]:
+    """Toutes les demandes de congé (société donnée) : en attente + validées, pour liste/calendrier."""
     ro = get_client()
     leaves = ro.execute_kw(
         "hr.leave", "search_read",
-        [[["employee_company_id", "=", settings.company_id], ["state", "in", ["confirm", "validate1", "validate", "refuse"]]]],
+        [[["employee_company_id", "=", company_id], ["state", "in", ["confirm", "validate1", "validate", "refuse"]]]],
         {"fields": ["employee_id", "work_entry_type_id", "request_date_from",
                     "request_date_to", "number_of_days", "state"],
          "order": "request_date_from desc"},
