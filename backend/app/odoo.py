@@ -68,15 +68,16 @@ def _today_bounds_utc() -> tuple[str, str]:
             end_local.astimezone(timezone.utc).strftime(ODOO_FMT))
 
 
-def _company_domain() -> list:
-    return [["company_id", "=", settings.company_id]]
+def _company_domain(company_id: int | None = None) -> list:
+    return [["company_id", "=", company_id or settings.company_id]]
 
 
 # --- Employés --------------------------------------------------------------
 
 def get_employee(hr_employee_id: int) -> dict | None:
     client = get_client()
-    domain = [["id", "=", hr_employee_id]] + _company_domain()
+    company_id = employee_company_id(hr_employee_id)
+    domain = [["id", "=", hr_employee_id]] + _company_domain(company_id)
     rows = client.execute_kw(
         "hr.employee", "search_read", [domain],
         {"fields": ["name", "job_title", "work_email", "work_phone",
@@ -474,12 +475,13 @@ def _day_bounds_utc(date_iso: str | None) -> tuple[str, str]:
 def today_interventions(hr_employee_id: int, date_iso: str | None = None) -> dict:
     """Créneaux planifiés du jour choisi (par défaut aujourd'hui) pour l'employé."""
     client = get_client()
+    company_id = employee_company_id(hr_employee_id)
     start, end = _day_bounds_utc(date_iso)
     domain = [
         ["employee_ids", "in", [hr_employee_id]],
         ["start_datetime", ">=", start],
         ["start_datetime", "<", end],
-    ] + _company_domain()
+    ] + _company_domain(company_id)
     slots = client.execute_kw(
         "planning.slot", "search_read", [domain],
         {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
@@ -492,7 +494,8 @@ def today_interventions(hr_employee_id: int, date_iso: str | None = None) -> dic
 def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
     """Détail d'un créneau + infos client (tout créneau de la société, pour rapport)."""
     client = get_client()
-    domain = [["id", "=", slot_id]] + _company_domain()
+    company_id = employee_company_id(hr_employee_id)
+    domain = [["id", "=", slot_id]] + _company_domain(company_id)
     rows = client.execute_kw(
         "planning.slot", "search_read", [domain],
         {"fields": _SLOT_FIELDS + ["employee_ids"], "limit": 1},
@@ -512,7 +515,7 @@ def intervention_detail(slot_id: int, hr_employee_id: int) -> dict | None:
         if prows:
             slot["partner"] = prows[0]
             slot["known_issues"] = _html_to_text(prows[0].get("comment")) or None
-        slot["history"] = client_history(pid)
+        slot["history"] = client_history(pid, company_id=company_id)
     return slot
 
 
@@ -585,7 +588,8 @@ def _default_income_account() -> int | None:
 
 
 def create_draft_invoice(partner_id: int, products: list[dict], discount: float = 0.0,
-                         origin: str | None = None) -> int:
+                         origin: str | None = None,
+                         company_id: int | None = None) -> int:
     """Crée une facture client BROUILLON (account.move, move_type=out_invoice).
 
     Lignes catalogue → product_id (Odoo calcule compte + taxes) ; lignes libres → nom +
@@ -611,7 +615,7 @@ def create_draft_invoice(partner_id: int, products: list[dict], discount: float 
     vals = {
         "move_type": "out_invoice",
         "partner_id": partner_id,
-        "company_id": settings.company_id,
+        "company_id": company_id or settings.company_id,
         "invoice_line_ids": lines,
     }
     if origin:
@@ -628,9 +632,10 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
                         employee_name: str = "", worker_ids: list[int] | None = None,
                         materials: str | None = None, next_action: str | None = None,
                         next_action_date: str | None = None, schedule: str | None = None) -> dict:
-    """Crée un planning.slot (company 5, rôle Technicien) + remplit la FICHE de chantier
+    """Crée un planning.slot (rôle Technicien, société de l'employé) + remplit la FICHE de chantier
     (worksheet) + note récap + pièces jointes (photos/signature) + facture brouillon si
     « à facturer ». Le client libre n'est créé que pour facturer."""
+    company_id = employee_company_id(hr_employee_id)
     workers = [int(w) for w in (worker_ids or [])] or [hr_employee_id]
     title_bits = [b for b in [type_label, client_name] if b]
     label = " — ".join(title_bits) or name or "Intervention"
@@ -638,7 +643,7 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
         "employee_ids": [(6, 0, workers)],
         "start_datetime": start_utc,
         "end_datetime": end_utc,
-        "company_id": settings.company_id,
+        "company_id": company_id,
         "role_id": ROLE_TECHNICIEN_ID,
         "name": label,
     }
@@ -730,7 +735,7 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
                 bill_partner = None
         if bill_partner:
             try:
-                invoice_id = create_draft_invoice(bill_partner, products, discount, origin=label)
+                invoice_id = create_draft_invoice(bill_partner, products, discount, origin=label, company_id=company_id)
                 rw.execute_kw("planning.slot", "message_post", [[slot_id]],
                               {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
             except Exception:
@@ -808,12 +813,12 @@ def _html_to_text(html: str | None) -> str:
     return "\n".join(l for l in lines if l).strip()
 
 
-def client_history(partner_id: int, limit: int = 3) -> list[dict]:
+def client_history(partner_id: int, limit: int = 3, company_id: int | None = None) -> list[dict]:
     """Les dernières tâches Odoo du client (project.task) : date, libellé, étape."""
     ro = get_client()
     tasks = ro.execute_kw(
         "project.task", "search_read",
-        [[["partner_id", "=", partner_id]] + _company_domain()],
+        [[["partner_id", "=", partner_id]] + _company_domain(company_id)],
         {"fields": ["name", "stage_id", "create_date", "date_deadline"],
          "order": "create_date desc", "limit": limit},
     )
@@ -832,9 +837,10 @@ def slot_overlaps(hr_employee_id: int, start_utc: str, end_utc: str,
                   exclude_id: int | None = None) -> dict | None:
     """Renvoie un créneau de l'employé qui chevauche [start, end[, sinon None."""
     ro = get_client()
+    company_id = employee_company_id(hr_employee_id)
     domain = [["employee_ids", "in", [hr_employee_id]],
               ["start_datetime", "<", end_utc],
-              ["end_datetime", ">", start_utc]] + _company_domain()
+              ["end_datetime", ">", start_utc]] + _company_domain(company_id)
     if exclude_id:
         domain.append(["id", "!=", exclude_id])
     rows = ro.execute_kw(
@@ -1038,10 +1044,11 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
 
     Restreint au créneau assigné à l'employé. Renvoie None si non autorisé.
     """
+    company_id = employee_company_id(hr_employee_id)
     ro = get_client()
     rows = ro.execute_kw(
         "planning.slot", "search_read",
-        [[["id", "=", slot_id]] + _company_domain()],
+        [[["id", "=", slot_id]] + _company_domain(company_id)],
         {"fields": ["task_id", "project_id", "partner_id", "name", "start_datetime", "employee_ids"], "limit": 1},
     )
     if not rows:
@@ -1279,6 +1286,7 @@ def _week_bounds(offset: int = 0) -> tuple[datetime, datetime]:
 
 def week_planning(hr_employee_id: int, offset: int = 0) -> dict:
     """Créneaux de la semaine (offset) de l'employé, avec jour local pré-calculé."""
+    company_id = employee_company_id(hr_employee_id)
     monday, next_monday = _week_bounds(offset)
     start = monday.astimezone(timezone.utc).strftime(ODOO_FMT)
     end = next_monday.astimezone(timezone.utc).strftime(ODOO_FMT)
@@ -1286,7 +1294,7 @@ def week_planning(hr_employee_id: int, offset: int = 0) -> dict:
     slots = ro.execute_kw(
         "planning.slot", "search_read",
         [[["employee_ids", "in", [hr_employee_id]],
-          ["start_datetime", ">=", start], ["start_datetime", "<", end]] + _company_domain()],
+          ["start_datetime", ">=", start], ["start_datetime", "<", end]] + _company_domain(company_id)],
         {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
     )
     for s in slots:
@@ -1297,6 +1305,7 @@ def week_planning(hr_employee_id: int, offset: int = 0) -> dict:
 
 def upcoming_planning(hr_employee_id: int, days: int = 5) -> dict:
     """Créneaux planifiés de l'employé sur les `days` prochains jours (aujourd'hui inclus)."""
+    company_id = employee_company_id(hr_employee_id)
     days = max(1, min(days, 14))
     now = datetime.now(TZ)
     start_local = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1307,7 +1316,7 @@ def upcoming_planning(hr_employee_id: int, days: int = 5) -> dict:
     slots = ro.execute_kw(
         "planning.slot", "search_read",
         [[["employee_ids", "in", [hr_employee_id]],
-          ["start_datetime", ">=", start], ["start_datetime", "<", end]] + _company_domain()],
+          ["start_datetime", ">=", start], ["start_datetime", "<", end]] + _company_domain(company_id)],
         {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
     )
     for s in slots:
@@ -1700,6 +1709,7 @@ def set_employee_pin(hr_employee_id: int, pin: str) -> dict:
 def poll_events(hr_employee_id: int, since_utc: str) -> list[dict]:
     """Événements Odoo depuis `since_utc` (UTC 'YYYY-MM-DD HH:MM:SS') : congés
     validés/refusés + planning créé/modifié pour l'employé. Lecture seule."""
+    company_id = employee_company_id(hr_employee_id)
     ro = get_client()
     events = []
 
@@ -1724,7 +1734,7 @@ def poll_events(hr_employee_id: int, since_utc: str) -> list[dict]:
 
     slots = ro.execute_kw(
         "planning.slot", "search_read",
-        [[["employee_ids", "in", [hr_employee_id]], ["write_date", ">", since_utc]] + _company_domain()],
+        [[["employee_ids", "in", [hr_employee_id]], ["write_date", ">", since_utc]] + _company_domain(company_id)],
         {"fields": _SLOT_FIELDS + ["write_date", "create_date"]},
     )
     for s in slots:
@@ -1776,10 +1786,11 @@ def create_expense(hr_employee_id: int, name: str, amount: float, category_id: i
                    tax_id: int | None, date: str | None, description: str | None,
                    photos: list[str] | None = None) -> dict:
     """Crée une note de frais (hr.expense) en BROUILLON pour l'employé. Montant = TTC."""
+    company_id = employee_company_id(hr_employee_id)
     rw = get_write_client()
     vals = {
         "employee_id": hr_employee_id,
-        "company_id": settings.company_id,
+        "company_id": company_id,
         "currency_id": EXPENSE_CCY,
         "name": (name or "").strip() or "Note de frais",
         "price_unit": float(amount),
