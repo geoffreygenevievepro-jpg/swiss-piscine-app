@@ -390,3 +390,79 @@ def test_me_gate_falls_back_to_settings_when_no_company_id(monkeypatch):
 
     assert r.status_code == 200
     assert captured.get("company_id") == _settings.company_id
+
+
+# ---- Task 4 tests -----------------------------------------------------------
+
+def test_company_branding_returns_name_and_logo_data_url(monkeypatch):
+    """company_branding renvoie name + logo en data URL depuis res.company."""
+    ro = MagicMock()
+    ro.execute_kw.return_value = [{"name": "Elie Paysage SA", "logo": "QUJD"}]
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+
+    result = odoo.company_branding(7)
+
+    assert result["id"] == 7
+    assert result["name"] == "Elie Paysage SA"
+    assert result["logo"] == "data:image/png;base64,QUJD"
+
+
+def test_company_branding_returns_none_on_exception(monkeypatch):
+    """company_branding renvoie name/logo None si l'appel Odoo échoue."""
+    ro = MagicMock()
+    ro.execute_kw.side_effect = Exception("Odoo unreachable")
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+
+    result = odoo.company_branding(7)
+
+    assert result == {"id": 7, "name": None, "logo": None}
+
+
+def test_company_theme_color_returns_color(monkeypatch):
+    """company_theme_color renvoie la valeur theme_color depuis Supabase."""
+    import app.supabase_access as _sa
+
+    monkeypatch.setattr(_sa, "_get", lambda path: [{"theme_color": "#ff5500"}])
+
+    result = _sa.company_theme_color(7)
+    assert result == "#ff5500"
+
+
+def test_company_theme_color_returns_none_when_absent(monkeypatch):
+    """company_theme_color renvoie None si pas de ligne Supabase."""
+    import app.supabase_access as _sa
+
+    monkeypatch.setattr(_sa, "_get", lambda path: None)
+
+    result = _sa.company_theme_color(7)
+    assert result is None
+
+
+def test_me_includes_company_block_with_fallback_color(monkeypatch):
+    """/me doit inclure un bloc company avec la couleur de repli si Supabase renvoie None."""
+    import app.supabase_access as _sa
+    import app.odoo as _odoo
+    from app.main import app as _app
+    from app.deps import get_current_employee
+
+    monkeypatch.setattr(_odoo, "get_employee", lambda hr_id: {})
+    monkeypatch.setattr(_odoo, "employee_extra", lambda hr_id: {})
+    monkeypatch.setattr(_sa, "access_decision", lambda hr_id, company_id: {"allowed": True, "effective_tabs": []})
+    monkeypatch.setattr(_odoo, "company_branding", lambda cid: {"id": cid, "name": "Swiss Piscine Sàrl", "logo": None})
+    monkeypatch.setattr(_sa, "company_theme_color", lambda cid: None)
+
+    fake_emp = {
+        "id": 1, "login": "u", "name": "U", "role": "tech",
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": 5,
+    }
+    _app.dependency_overrides[get_current_employee] = lambda: fake_emp
+    r = client.get("/me")
+    _app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    data = r.json()
+    assert "company" in data
+    assert data["company"]["id"] == 5
+    assert data["company"]["name"] == "Swiss Piscine Sàrl"
+    assert data["company"]["logo"] is None
+    assert data["company"]["color"] == "#0c5e68"

@@ -64,6 +64,14 @@ def get_company_config(company_id: int) -> dict | None:
     return rows[0] if rows else None
 
 
+def company_theme_color(company_id: int) -> str | None:
+    """Couleur d'accentuation de la société depuis app_rh_company_config. None si absente."""
+    rows = _get(f"app_rh_company_config?company_id=eq.{company_id}&select=theme_color")
+    if rows and rows[0].get("theme_color"):
+        return rows[0]["theme_color"]
+    return None
+
+
 def get_employee_access(hr_employee_id: int) -> dict | None:
     rows = _get(
         f"app_rh_access?hr_employee_id=eq.{hr_employee_id}&select=access_active,allowed_tabs,level"

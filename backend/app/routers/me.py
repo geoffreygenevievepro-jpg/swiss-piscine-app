@@ -33,9 +33,13 @@ def me(emp=Depends(get_current_employee)):
         odoo_profile = None
 
     # Onglets contrôlables visibles pour cet employé (droits App RH, vue.heiwa).
+    cid = emp["company_id"] if emp["company_id"] else settings.company_id
     effective_tabs = supabase_access.access_decision(
-        emp["hr_employee_id"], emp["company_id"] if emp["company_id"] else settings.company_id
+        emp["hr_employee_id"], cid
     )["effective_tabs"]
+
+    branding = odoo.company_branding(cid)
+    color = supabase_access.company_theme_color(cid) or "#0c5e68"
 
     return {
         "id": emp["id"],
@@ -48,6 +52,7 @@ def me(emp=Depends(get_current_employee)):
         "avatar": extra.get("avatar"),
         "activity_rate": extra.get("activity_rate"),
         "resume": extra.get("resume", []),
+        "company": {**branding, "color": color},
     }
 
 

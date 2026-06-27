@@ -761,6 +761,21 @@ def employee_company_id(hr_employee_id: int) -> int:
     return _emp_company_cache[hr_employee_id]
 
 
+def company_branding(company_id: int) -> dict:
+    """Nom et logo (data URL) de la société depuis res.company. Best-effort."""
+    try:
+        rows = get_client().execute_kw(
+            "res.company", "read", [[company_id]], {"fields": ["name", "logo"]}
+        )
+        row = rows[0] if rows else {}
+        name = row.get("name") or None
+        logo_raw = row.get("logo") or None
+        logo = "data:image/png;base64," + logo_raw if logo_raw else None
+        return {"id": company_id, "name": name, "logo": logo}
+    except Exception:
+        return {"id": company_id, "name": None, "logo": None}
+
+
 def search_partners(query: str, company_id: int | None = None, limit: int = 15) -> list[dict]:
     """Recherche de clients (res.partner) par nom ou ville, pour le formulaire.
 
