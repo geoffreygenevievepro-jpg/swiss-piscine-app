@@ -50,9 +50,9 @@ export const accueil = {
       <h2 style="margin:4px 0 18px">Salut${prenom ? " " + escapeHtml(prenom) : ""}</h2>
       <div id="dash"><div class="placeholder"><div class="big">${icon("home")}</div>Chargement…</div></div>`;
     const dash = root.querySelector("#dash");
-    let overview, balances, planning, leaves, team, holidays, status, ann;
+    let overview, balances, planning, leaves, team, holidays, status, ann, bdays;
     try {
-      [overview, balances, planning, leaves, team, holidays, status, ann] = await Promise.all([
+      [overview, balances, planning, leaves, team, holidays, status, ann, bdays] = await Promise.all([
         api("/attendance/overview"),
         api("/rh/balances"),
         api("/week/upcoming?days=5"),
@@ -61,12 +61,14 @@ export const accueil = {
         api("/week/holidays").catch(() => []),
         api("/attendance/status").catch(() => ({ state: "out" })),
         api("/announcement").catch(() => ({})),
+        api("/birthdays/today").catch(() => []),
       ]);
     } catch {
       dash.innerHTML = `<div class="card" style="border-color:var(--danger)">Impossible de charger le tableau de bord.</div>`;
       return;
     }
     dash.innerHTML =
+      birthdayBanner(bdays) +
       messageBanner(ann, false) +
       meteoCard() +
       quickActions(status) +
@@ -84,6 +86,20 @@ export const accueil = {
 
 function cardHead(title, ic) {
   return `<div class="card-head"><div class="t">${ic ? icon(ic) : ""}<h3>${title}</h3></div>${icon("chevR", "chev")}</div>`;
+}
+
+// --- Bandeau anniversaire ----------------------------------------------------
+function birthdayBanner(list) {
+  if (!Array.isArray(list) || !list.length) return "";
+  const me = list.find(b => b.is_me);
+  const others = list.filter(b => !b.is_me);
+  const lines = [];
+  if (me) lines.push(`<div class="bday-line"><strong>Joyeux anniversaire ${escapeHtml(me.first_name)} !</strong></div>`);
+  others.forEach(o => lines.push(`<div class="bday-line">Aujourd'hui, <strong>${escapeHtml(o.first_name)}</strong> fête son anniversaire</div>`));
+  return `<div class="card bday-card">
+    <span class="bday-ic">${icon("gift")}</span>
+    <div class="bday-body">${lines.join("")}</div>
+  </div>`;
 }
 
 // --- Météo colorée -----------------------------------------------------------
