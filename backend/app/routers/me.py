@@ -34,7 +34,7 @@ def me(emp=Depends(get_current_employee)):
 
     # Onglets contrôlables visibles pour cet employé (droits App RH, vue.heiwa).
     effective_tabs = supabase_access.access_decision(
-        emp["hr_employee_id"], settings.company_id
+        emp["hr_employee_id"], emp["company_id"] if emp["company_id"] else settings.company_id
     )["effective_tabs"]
 
     return {

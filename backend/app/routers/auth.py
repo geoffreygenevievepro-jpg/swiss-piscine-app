@@ -80,7 +80,7 @@ def login(body: LoginRequest, request: Request):
 
     # Gate d'accès App RH (piloté depuis vue.heiwa). Fail-open : on refuse
     # uniquement si l'accès est explicitement désactivé côté Supabase.
-    if not supabase_access.access_decision(emp["hr_employee_id"], settings.company_id)["allowed"]:
+    if not supabase_access.access_decision(emp["hr_employee_id"], emp["company_id"] if emp["company_id"] else settings.company_id)["allowed"]:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "Accès suspendu — contactez l'administration RH",

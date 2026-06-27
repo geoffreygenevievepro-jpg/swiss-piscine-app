@@ -265,3 +265,128 @@ def test_router_interventions_employees_passes_company(monkeypatch):
 
     assert r.status_code == 200
     assert captured.get("cid") == 9
+
+
+# ---- Task 3 tests -----------------------------------------------------------
+
+def test_migration_adds_company_id_column(tmp_path, monkeypatch):
+    """init_db() doit ajouter la colonne company_id à la table employees."""
+    from app import db as _db
+    monkeypatch.setattr(_db.settings, "db_path", str(tmp_path / "test.db"))
+    _db.init_db()
+    with _db.get_conn() as conn:
+        cols = [row[1] for row in conn.execute("PRAGMA table_info(employees)").fetchall()]
+    assert "company_id" in cols
+
+
+def test_upsert_employee_stores_company_id(tmp_path, monkeypatch):
+    """upsert_employee(..., company_id=7) → get_employee_by_login renvoie company_id==7."""
+    from app import db as _db
+    monkeypatch.setattr(_db.settings, "db_path", str(tmp_path / "test.db"))
+    _db.init_db()
+    _db.upsert_employee(
+        hr_employee_id=200,
+        login="test_user",
+        name="Test User",
+        role="tech",
+        pin_hash="hashed",
+        company_id=7,
+    )
+    emp = _db.get_employee_by_login("test_user")
+    assert emp is not None
+    assert emp["company_id"] == 7
+
+
+def test_upsert_employee_updates_company_id(tmp_path, monkeypatch):
+    """upsert_employee avec nouveau company_id met à jour la ligne existante."""
+    from app import db as _db
+    monkeypatch.setattr(_db.settings, "db_path", str(tmp_path / "test.db"))
+    _db.init_db()
+    _db.upsert_employee(200, "test_user", "Test User", "tech", "hashed", company_id=7)
+    _db.upsert_employee(200, "test_user", "Test User", "tech", "hashed", company_id=9)
+    emp = _db.get_employee_by_login("test_user")
+    assert emp["company_id"] == 9
+
+
+def test_login_gate_uses_employee_company_id(tmp_path, monkeypatch):
+    """login() doit appeler access_decision avec company_id de l'employé (pas settings)."""
+    import app.supabase_access as _sa
+    from app import db as _db
+    monkeypatch.setattr(_db.settings, "db_path", str(tmp_path / "test.db"))
+    _db.init_db()
+
+    from app.security import hash_pin
+    _db.upsert_employee(300, "emp_co7", "Emp Co7", "tech", hash_pin("1234"), company_id=7)
+
+    captured = {}
+    def fake_access_decision(hr_id, company_id):
+        captured["company_id"] = company_id
+        return {"allowed": True, "effective_tabs": []}
+    monkeypatch.setattr(_sa, "access_decision", fake_access_decision)
+
+    # Patch twofa so we skip the 2FA flow (simulate trusted device)
+    import app.twofa as _twofa
+    monkeypatch.setattr(_twofa, "hash_token", lambda t: t)
+    import app.db as _db2
+    monkeypatch.setattr(_db2, "is_device_trusted", lambda *a, **kw: True)
+
+    r = client.post("/auth/login", json={"login": "emp_co7", "pin": "1234"})
+    assert r.status_code == 200
+    assert captured.get("company_id") == 7
+
+
+def test_me_gate_uses_employee_company_id(monkeypatch):
+    """GET /me doit appeler access_decision avec company_id de l'employé (pas settings)."""
+    import app.supabase_access as _sa
+    import app.odoo as _odoo
+
+    captured = {}
+    def fake_access_decision(hr_id, company_id):
+        captured["company_id"] = company_id
+        return {"allowed": True, "effective_tabs": []}
+    monkeypatch.setattr(_sa, "access_decision", fake_access_decision)
+    monkeypatch.setattr(_odoo, "get_employee", lambda hr_id: {})
+    monkeypatch.setattr(_odoo, "employee_extra", lambda hr_id: {})
+
+    from app.main import app as _app
+    from app.deps import get_current_employee
+
+    fake_emp = {
+        "id": 1, "login": "u", "name": "U", "role": "tech",
+        "hr_employee_id": 300, "pin_hash": "h", "company_id": 7,
+    }
+    _app.dependency_overrides[get_current_employee] = lambda: fake_emp
+    r = client.get("/me")
+    _app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    assert captured.get("company_id") == 7
+
+
+def test_me_gate_falls_back_to_settings_when_no_company_id(monkeypatch):
+    """GET /me doit utiliser settings.company_id si company_id de l'employé est None."""
+    import app.supabase_access as _sa
+    import app.odoo as _odoo
+    from app.config import settings as _settings
+
+    captured = {}
+    def fake_access_decision(hr_id, company_id):
+        captured["company_id"] = company_id
+        return {"allowed": True, "effective_tabs": []}
+    monkeypatch.setattr(_sa, "access_decision", fake_access_decision)
+    monkeypatch.setattr(_odoo, "get_employee", lambda hr_id: {})
+    monkeypatch.setattr(_odoo, "employee_extra", lambda hr_id: {})
+
+    from app.main import app as _app
+    from app.deps import get_current_employee
+
+    fake_emp = {
+        "id": 1, "login": "u", "name": "U", "role": "tech",
+        "hr_employee_id": 300, "pin_hash": "h", "company_id": None,
+    }
+    _app.dependency_overrides[get_current_employee] = lambda: fake_emp
+    r = client.get("/me")
+    _app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    assert captured.get("company_id") == _settings.company_id

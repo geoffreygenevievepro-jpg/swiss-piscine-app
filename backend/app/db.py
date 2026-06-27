@@ -89,6 +89,7 @@ def init_db() -> None:
             "ALTER TABLE employees ADD COLUMN twofa_method TEXT",
             "ALTER TABLE employees ADD COLUMN twofa_secret_encrypted TEXT",
             "ALTER TABLE employees ADD COLUMN twofa_enabled INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE employees ADD COLUMN company_id INTEGER",
         ):
             try:
                 conn.execute(ddl)
@@ -124,17 +125,25 @@ def get_employee_by_id(emp_id: int) -> sqlite3.Row | None:
         ).fetchone()
 
 
-def upsert_employee(hr_employee_id: int, login: str, name: str, role: str, pin_hash: str) -> None:
+def upsert_employee(
+    hr_employee_id: int,
+    login: str,
+    name: str,
+    role: str,
+    pin_hash: str,
+    company_id: int | None = None,
+) -> None:
     with get_conn() as conn:
         conn.execute(
             """
-            INSERT INTO employees (hr_employee_id, login, name, role, pin_hash, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO employees (hr_employee_id, login, name, role, pin_hash, company_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(hr_employee_id) DO UPDATE SET
                 login=excluded.login, name=excluded.name,
-                role=excluded.role, pin_hash=excluded.pin_hash
+                role=excluded.role, pin_hash=excluded.pin_hash,
+                company_id=excluded.company_id
             """,
-            (hr_employee_id, login, name, role, pin_hash, _utcnow_iso()),
+            (hr_employee_id, login, name, role, pin_hash, company_id, _utcnow_iso()),
         )
 
 
