@@ -281,7 +281,6 @@ export async function renderReport(root, ctx = {}) {
   function renderProducts() {
     pLines.innerHTML = state.products.length
       ? state.products.map((p, i) => {
-          const lt = (Number(p.qty) || 0) * (Number(p.price) || 0);
           return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)">
             <span style="flex:1;min-width:0">${escapeHtml(p.name)}${p.billable ? ` <span class="chip active" style="padding:1px 6px;font-size:.7rem">à facturer</span>` : ""}<span style="color:var(--muted);font-size:.8rem"> · ${Number(p.qty) || 0} × ${p.price != null ? fmtCHF(Number(p.price)) : "—"}</span></span>
             <button type="button" data-rmp="${i}" style="border:0;background:none;cursor:pointer;color:var(--muted);display:flex">${icon("x", "icon-sm")}</button>
