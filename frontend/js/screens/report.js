@@ -369,7 +369,7 @@ export async function renderReport(root, ctx = {}) {
           start_time: root.querySelector("#r-start-t").value,
           end_time: root.querySelector("#r-end-t").value,
           partner_id: pid ? Number(pid) : null, client_name: cname,
-          photos, products: billable, discount, vat_rate: vat,
+          photos, parts, products: billable, discount, vat_rate: vat,
           tag_ids: state.tags, worker_ids: state.workers, resource_ids: state.resources,
           signature, status: state.status, remarques,
           next_action, next_action_date,
