@@ -58,6 +58,7 @@ h1, h2, h3, strong, .display { font-family: var(--font-display); font-weight: 70
 .app-header .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .brand-mark { width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto; background: linear-gradient(150deg, var(--navy), var(--aqua-dark)); display: flex; align-items: center; justify-content: center; color: #fff; }
 .brand-mark .icon { width: 19px; height: 19px; }
+.brand-logo { height: 30px; width: auto; border-radius: 7px; display: block; }
 .app-header .brand b { font-family: var(--font-display); font-weight: 700; font-size: 1rem; color: var(--navy); display: block; line-height: 1.1; letter-spacing: -.02em; }
 .header-right { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 .who-name { font-size: .88rem; font-weight: 500; color: var(--ink); }

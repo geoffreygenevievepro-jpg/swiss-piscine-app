@@ -2,6 +2,7 @@
 // synchro, enregistrement du service worker.
 import { tokens, profile } from "./store.js";
 import { injectSprite, icon } from "./icons.js";
+import { applyTheme } from "./theme.js";
 import { openSheet } from "./sheet.js";
 import { renderChrono } from "./screens/chrono.js";
 import { logout as apiLogout, api } from "./api.js";
@@ -65,17 +66,18 @@ async function flushOutbox() {
 }
 
 function mountApp(screenId = current) {
+  applyTheme((profile.get()||{}).company);
   current = screenId;
   document.body.classList.remove("screen-login");
   const me = profile.get();
   const who = me && me.name ? me.name.replace(/[&<>"']/g, "") : "";
   const initials = who ? who.split(" ").filter(Boolean).map(w => w[0]).slice(0, 2).join("").toUpperCase() : "";
+  const co = (me && me.company) || {};
+  const brand = co.logo ? `<img class="brand-logo" src="${co.logo}" alt="">` : `<span class="brand-mark">${icon("wave")}</span>`;
+  const coName = (co.name || "Swiss Piscine").replace(/[&<>"']/g, "");
   root.innerHTML = `
     <header class="app-header">
-      <div class="brand">
-        <span class="brand-mark">${icon("wave")}</span>
-        <div><b>Swiss Piscine</b><span class="eyebrow">Espace équipe</span></div>
-      </div>
+      <div class="brand">${brand}<div><b>${coName}</b><span class="eyebrow">Espace équipe</span></div></div>
       <div class="header-right">
         <span class="sync-badge" id="sync-badge"><span class="dot"></span><span class="txt">À jour</span></span>
         <button class="logout-btn notif-btn" id="notif-btn" title="Notifications" aria-label="Notifications">${icon("bell", "icon-sm")}<span class="notif-count" id="notif-count" hidden>0</span></button>
