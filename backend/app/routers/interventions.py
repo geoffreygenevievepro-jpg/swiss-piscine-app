@@ -105,8 +105,9 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
 
 @router.get("/employees")
 def employees(emp=Depends(get_current_employee)):
-    """Liste des employés (company 5) pour désigner qui a travaillé sur le chantier."""
-    return [{"id": e["id"], "name": e["name"]} for e in odoo.list_employees()]
+    """Liste des employés de la société de l'employé courant pour désigner qui a travaillé sur le chantier."""
+    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    return [{"id": e["id"], "name": e["name"]} for e in odoo.list_employees(company_id)]
 
 
 @router.get("/partners/search")

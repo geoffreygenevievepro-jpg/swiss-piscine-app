@@ -244,3 +244,24 @@ def test_router_manager_leaves_manager_passes_company(monkeypatch):
     assert r.status_code == 200
     assert captured.get("cid") == 9
     assert captured.get("mgr") == 42
+
+
+# Router test: GET /employees passes employee's company to list_employees
+def test_router_interventions_employees_passes_company(monkeypatch):
+    """GET /employees doit appeler odoo.list_employees(company_id) avec la société de l'employé."""
+    captured = {}
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 9)
+    monkeypatch.setattr(
+        odoo, "list_employees",
+        lambda company_id: captured.__setitem__("cid", company_id) or []
+    )
+
+    app.dependency_overrides[get_current_employee] = lambda: {
+        "id": 1, "login": "u", "name": "U", "role": "tech",
+        "hr_employee_id": 42, "pin_hash": "h"
+    }
+    r = client.get("/employees")
+    app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    assert captured.get("cid") == 9

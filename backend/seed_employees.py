@@ -14,6 +14,7 @@ import sqlite3
 import unicodedata
 
 from app import db, odoo
+from app.config import settings
 from app.security import hash_pin
 
 
@@ -60,7 +61,7 @@ def main() -> None:
     args = ap.parse_args()
 
     db.init_db()
-    employees = odoo.list_employees()
+    employees = odoo.list_employees(settings.company_id)
     if not employees:
         print("Aucun employé trouvé pour company_id=5.")
         return
