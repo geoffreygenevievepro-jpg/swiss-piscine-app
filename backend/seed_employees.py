@@ -1,9 +1,10 @@
-"""Seed des comptes employés dans SQLite à partir de hr.employee (Odoo company 5).
+"""Seed des comptes employés dans SQLite à partir de hr.employee (Odoo).
 
 Usage :
-    python seed_employees.py            # crée les comptes manquants (PIN aléatoire)
-    python seed_employees.py --reset    # régénère TOUS les comptes (nouveaux PIN)
-    python seed_employees.py --pin 0000 # impose un même PIN à tous (dev uniquement)
+    python seed_employees.py                      # company par défaut, comptes manquants
+    python seed_employees.py --reset              # régénère TOUS les comptes (nouveaux PIN)
+    python seed_employees.py --pin 0000           # impose un même PIN à tous (dev uniquement)
+    python seed_employees.py --companies 5,7      # seed pour plusieurs sociétés
 
 À lancer depuis app-terrain/backend/. Affiche un tableau login / PIN à distribuer
 à l'équipe. Les logins sont éditables ensuite directement en base si besoin.
@@ -48,6 +49,11 @@ def role_for(job_title: str | None) -> str:
     return "tech"
 
 
+def companies_arg(s: str) -> list[int]:
+    """Parse a CSV string of company ids: '5, 4 ,' → [5, 4]."""
+    return [int(part) for part in s.split(",") if part.strip()]
+
+
 def existing_hr_ids() -> set[int]:
     with db.get_conn() as conn:
         rows = conn.execute("SELECT hr_employee_id FROM employees").fetchall()
@@ -58,13 +64,16 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--reset", action="store_true", help="régénère tous les comptes")
     ap.add_argument("--pin", help="PIN imposé commun (dev uniquement)")
+    ap.add_argument(
+        "--companies",
+        default=str(settings.company_id),
+        help="CSV d'identifiants de sociétés Odoo (ex. 5,7). Défaut : company_id dans .env",
+    )
     args = ap.parse_args()
 
+    company_ids = companies_arg(args.companies)
+
     db.init_db()
-    employees = odoo.list_employees(settings.company_id)
-    if not employees:
-        print("Aucun employé trouvé pour company_id=5.")
-        return
 
     already = set() if args.reset else existing_hr_ids()
     used_logins: set[str] = set()
@@ -74,16 +83,23 @@ def main() -> None:
 
     created = []
     skipped = []
-    for emp in employees:
-        hr_id = emp["id"]
-        if hr_id in already:
-            skipped.append(emp["name"])
+
+    for cid in company_ids:
+        employees = odoo.list_employees(cid)
+        if not employees:
+            print(f"Aucun employé trouvé pour company_id={cid}.")
             continue
-        login = make_login(emp["name"], used_logins)
-        pin = args.pin or f"{secrets.randbelow(900000) + 100000}"  # 6 chiffres
-        role = role_for(emp.get("job_title"))
-        db.upsert_employee(hr_id, login, emp["name"], role, hash_pin(pin))
-        created.append((emp["name"], login, pin, role))
+
+        for emp in employees:
+            hr_id = emp["id"]
+            if hr_id in already:
+                skipped.append(emp["name"])
+                continue
+            login = make_login(emp["name"], used_logins)
+            pin = args.pin or f"{secrets.randbelow(900000) + 100000}"  # 6 chiffres
+            role = role_for(emp.get("job_title"))
+            db.upsert_employee(hr_id, login, emp["name"], role, hash_pin(pin), company_id=cid)
+            created.append((emp["name"], login, pin, role))
 
     print("\n=== Comptes créés ===")
     if created:

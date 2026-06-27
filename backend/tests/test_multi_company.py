@@ -466,3 +466,48 @@ def test_me_includes_company_block_with_fallback_color(monkeypatch):
     assert data["company"]["name"] == "Swiss Piscine Sàrl"
     assert data["company"]["logo"] is None
     assert data["company"]["color"] == "#0c5e68"
+
+
+# ---- Task 6 tests -----------------------------------------------------------
+
+def test_companies_arg_parses_csv():
+    """companies_arg('5, 4 ,') doit renvoyer [5, 4] (strip, ignore empties)."""
+    from seed_employees import companies_arg
+    assert companies_arg("5, 4 ,") == [5, 4]
+
+
+def test_companies_arg_single():
+    """companies_arg('5') → [5]."""
+    from seed_employees import companies_arg
+    assert companies_arg("5") == [5]
+
+
+def test_seed_loop_calls_per_company(monkeypatch):
+    """main() avec --companies 5,7 appelle list_employees et upsert_employee pour chaque société."""
+    import sys
+    import seed_employees as se
+    from app import db as _db, odoo as _odoo
+
+    # Fake employees returned by list_employees
+    fake_emp = {"id": 100, "name": "Alice Martin", "job_title": "Tech"}
+
+    list_calls: list[int] = []
+    upsert_calls: list[dict] = []
+
+    def fake_list(cid: int):
+        list_calls.append(cid)
+        return [fake_emp]
+
+    def fake_upsert(hr_employee_id, login, name, role, pin_hash, company_id=None):
+        upsert_calls.append({"hr_id": hr_employee_id, "company_id": company_id})
+
+    monkeypatch.setattr(_odoo, "list_employees", fake_list)
+    monkeypatch.setattr(_db, "upsert_employee", fake_upsert)
+    monkeypatch.setattr(_db, "init_db", lambda: None)
+
+    # --reset skips the existing_hr_ids/get_conn queries, keeping the mock simple
+    monkeypatch.setattr(sys, "argv", ["seed_employees.py", "--companies", "5,7", "--pin", "000000", "--reset"])
+    se.main()
+
+    assert list_calls == [5, 7], f"list_employees appelé avec {list_calls}"
+    assert [c["company_id"] for c in upsert_calls] == [5, 7], f"company_ids dans upsert: {upsert_calls}"
