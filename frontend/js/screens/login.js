@@ -9,9 +9,9 @@ export function renderLogin(root, onSuccess) {
   root.innerHTML = `
     <div class="login-wrap">
       <div class="login-logo">
-        <div style="width:56px;height:56px;border-radius:15px;margin:0 auto 12px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#fff">${icon("wave", "icon-lg")}</div>
-        <strong style="font-size:1.25rem;color:#fff">Swiss Piscine</strong><br>
-        <span style="opacity:.8;font-size:.9rem">Espace équipe</span>
+        <div style="width:56px;height:56px;border-radius:15px;margin:0 auto 12px;background:rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;color:#fff">${icon("users", "icon-lg")}</div>
+        <strong style="font-size:1.25rem;color:#fff">Espace équipe</strong><br>
+        <span style="opacity:.8;font-size:.9rem">Connecte-toi pour accéder à ton espace</span>
       </div>
       <form class="login-card" id="login-form" novalidate>
         <h2>Connexion</h2>

@@ -1,7 +1,7 @@
 {
-  "name": "Swiss Piscine — Équipe",
-  "short_name": "SP Équipe",
-  "description": "App des équipes terrain Swiss Piscine : pointage, planning, interventions.",
+  "name": "Espace équipe",
+  "short_name": "Équipe",
+  "description": "Espace équipe : pointage, congés, notes de frais, documents et planning.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
