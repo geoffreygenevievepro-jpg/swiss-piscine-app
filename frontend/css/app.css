@@ -224,6 +224,13 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
 .qa-timbrage .qbadge { background: rgba(255,255,255,.22); color: #fff; }
 .qa-in { background: var(--ok); }
 .qa-out { background: var(--danger); }
+/* Vacances restantes — panneau visuel (dégradé soleil). */
+.vac-block { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 14px 16px; border-radius: 14px; background: linear-gradient(135deg, #fbbf6b, #e0735a); color: #fff; }
+.vac-ic { width: 46px; height: 46px; border-radius: 13px; background: rgba(255,255,255,.22); color: #fff; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.vac-meta { display: flex; flex-direction: column; min-width: 0; }
+.vac-num { font-size: 1.95rem; font-weight: 800; line-height: 1; }
+.vac-unit { font-size: 1rem; font-weight: 600; opacity: .92; }
+.vac-lbl { font-size: .85rem; opacity: .95; margin-top: 3px; }
 .qa b { font-weight: 600; font-size: .95rem; color: var(--ink); }
 .qa:hover { border-color: var(--aqua); background: var(--aqua-soft); }
 

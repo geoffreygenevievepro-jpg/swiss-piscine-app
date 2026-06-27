@@ -164,9 +164,12 @@ function resumeCard(ov, balances) {
   return `<div class="card dash-link" data-nav="pointer" style="cursor:pointer">
     ${cardHead("Résumé de mes heures", "clock")}
     <div class="gauges">${gauge("Aujourd'hui", ov.day)}${gauge("Ce mois", ov.month)}${gauge("Cette année", ov.year)}</div>
-    <div class="row" style="margin-top:14px;border-top:1px solid var(--line)">
-      <span class="qbadge bg-coral" style="width:34px;height:34px;border-radius:9px">${icon("sun", "icon-sm")}</span>
-      <span style="flex:1">Vacances restantes</span><strong class="tabular" style="font-size:1.05rem">${vac ? vac.remaining : 0} j</strong>
+    <div class="vac-block">
+      <span class="vac-ic">${icon("sun")}</span>
+      <div class="vac-meta">
+        <div class="vac-num tabular">${vac ? vac.remaining : 0}<span class="vac-unit"> jours</span></div>
+        <div class="vac-lbl">Vacances restantes</div>
+      </div>
     </div>
   </div>`;
 }
