@@ -220,7 +220,7 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
 .dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto; }
 .qa { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; cursor: pointer; font-family: var(--font-body); text-align: left; }
 /* Bouton timbrage : pleine largeur, en haut, entièrement coloré. */
-.qa-timbrage { width: 100%; margin-top: 12px; justify-content: center; border: 0; color: #fff; font-weight: 700; font-size: 1.05rem; }
+.qa-timbrage { width: 100%; margin-top: 12px; justify-content: center; border: 0; color: #fff; font-weight: 700; font-size: 1.05rem; transition: background .15s ease; }
 .qa-timbrage .qbadge { background: rgba(255,255,255,.22); color: #fff; }
 .qa-in { background: var(--ok); }
 .qa-out { background: var(--danger); }
@@ -233,6 +233,8 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
 .vac-lbl { font-size: .85rem; opacity: .95; margin-top: 3px; }
 .qa b { font-weight: 600; font-size: .95rem; color: var(--ink); }
 .qa:hover { border-color: var(--aqua); background: var(--aqua-soft); }
+/* Survol du bouton « Entrer » : vert un peu plus clair (pas le bleu générique). */
+.qa-timbrage.qa-in:hover { background: #3aa877; }
 
 /* --- Post-its pastel (Mes notes) --- */
 .postit-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 0 4px 20px; }
