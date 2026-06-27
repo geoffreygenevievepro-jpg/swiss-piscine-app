@@ -151,7 +151,7 @@ def test_router_week_team_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "staff",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/week/team")
     app.dependency_overrides.clear()
@@ -168,7 +168,7 @@ def test_router_week_holidays_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "staff",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/week/holidays")
     app.dependency_overrides.clear()
@@ -185,7 +185,7 @@ def test_router_admin_employees_hours_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "admin",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/admin/employees-hours")
     app.dependency_overrides.clear()
@@ -202,7 +202,7 @@ def test_router_admin_leaves_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "admin",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/admin/leaves")
     app.dependency_overrides.clear()
@@ -219,7 +219,7 @@ def test_router_manager_leaves_admin_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "admin",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/manager/leaves")
     app.dependency_overrides.clear()
@@ -236,7 +236,7 @@ def test_router_manager_leaves_manager_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "manager",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/manager/leaves")
     app.dependency_overrides.clear()
@@ -258,7 +258,7 @@ def test_router_interventions_employees_passes_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "tech",
-        "hr_employee_id": 42, "pin_hash": "h"
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/employees")
     app.dependency_overrides.clear()
@@ -526,7 +526,7 @@ def test_router_products_search_uses_employee_company(monkeypatch):
 
     app.dependency_overrides[get_current_employee] = lambda: {
         "id": 1, "login": "u", "name": "U", "role": "tech",
-        "hr_employee_id": 42, "pin_hash": "h",
+        "hr_employee_id": 42, "pin_hash": "h", "company_id": None
     }
     r = client.get("/products/search", params={"q": "pompe"})
     app.dependency_overrides.clear()

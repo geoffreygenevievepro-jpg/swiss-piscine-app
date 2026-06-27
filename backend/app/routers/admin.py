@@ -15,13 +15,13 @@ def require_admin(emp=Depends(get_current_employee)):
 
 @router.get("/employees-hours")
 def employees_hours(emp=Depends(require_admin)):
-    company_id = emp.get("company_id") or odoo.employee_company_id(emp["hr_employee_id"])
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
     return odoo.admin_employees_hours(company_id)
 
 
 @router.get("/leaves")
 def all_leaves(emp=Depends(require_admin)):
-    company_id = emp.get("company_id") or odoo.employee_company_id(emp["hr_employee_id"])
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
     return odoo.admin_leaves(company_id)
 
 
