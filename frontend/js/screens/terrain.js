@@ -29,7 +29,7 @@ function downscale(file) {
 
 export const terrain = {
   id: "terrain",
-  label: "Je fais",
+  label: "Rapport",
   icon: "tools",
   async render(root) {
     root.innerHTML = `${modeToggle()}<div id="t-content"></div>`;
