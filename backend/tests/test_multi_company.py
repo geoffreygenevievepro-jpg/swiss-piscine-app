@@ -511,3 +511,27 @@ def test_seed_loop_calls_per_company(monkeypatch):
 
     assert list_calls == [5, 7], f"list_employees appelé avec {list_calls}"
     assert [c["company_id"] for c in upsert_calls] == [5, 7], f"company_ids dans upsert: {upsert_calls}"
+
+
+# ---- I1 test — search_report_products scoped to employee's company ------------
+
+def test_router_products_search_uses_employee_company(monkeypatch):
+    """GET /products/search doit appeler search_report_products avec la société 9 (pas settings)."""
+    captured = {}
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 9)
+    monkeypatch.setattr(
+        odoo, "search_report_products",
+        lambda query, company_id, limit=20: captured.__setitem__("company_id", company_id) or [],
+    )
+
+    app.dependency_overrides[get_current_employee] = lambda: {
+        "id": 1, "login": "u", "name": "U", "role": "tech",
+        "hr_employee_id": 42, "pin_hash": "h",
+    }
+    r = client.get("/products/search", params={"q": "pompe"})
+    app.dependency_overrides.clear()
+
+    assert r.status_code == 200
+    assert captured.get("company_id") == 9, (
+        f"search_report_products appelé avec company_id={captured.get('company_id')}, attendu 9"
+    )

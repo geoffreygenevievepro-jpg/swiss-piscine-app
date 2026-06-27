@@ -106,7 +106,7 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
 @router.get("/employees")
 def employees(emp=Depends(get_current_employee)):
     """Liste des employés de la société de l'employé courant pour désigner qui a travaillé sur le chantier."""
-    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    company_id = emp.get("company_id") or odoo.employee_company_id(emp["hr_employee_id"])
     return [{"id": e["id"], "name": e["name"]} for e in odoo.list_employees(company_id)]
 
 
@@ -114,7 +114,8 @@ def employees(emp=Depends(get_current_employee)):
 def partners(q: str, emp=Depends(get_current_employee)):
     if len(q.strip()) < 2:
         return []
-    return odoo.search_partners(q.strip(), odoo.employee_company_id(emp["hr_employee_id"]))
+    company_id = emp.get("company_id") or odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.search_partners(q.strip(), company_id)
 
 
 @router.post("/partners", status_code=201)
@@ -142,7 +143,8 @@ def products_search(q: str, emp=Depends(get_current_employee)):
     """Recherche de pièces/produits pour la checklist du rapport."""
     if len(q.strip()) < 2:
         return []
-    return odoo.search_report_products(q.strip())
+    company_id = emp.get("company_id") or odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.search_report_products(q.strip(), company_id)
 
 
 @router.post("/interventions/{slot_id}/report", status_code=201)

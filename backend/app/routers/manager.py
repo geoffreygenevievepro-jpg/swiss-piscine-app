@@ -25,7 +25,7 @@ def _ensure_can_manage(emp, leave_id: int) -> None:
 @router.get("/leaves")
 def leaves_to_approve(emp=Depends(require_staff)):
     # Admin : toutes les demandes. Manager : seulement son équipe (parent_id).
-    company_id = odoo.employee_company_id(emp["hr_employee_id"])
+    company_id = emp.get("company_id") or odoo.employee_company_id(emp["hr_employee_id"])
     if emp["role"] == "admin":
         return odoo.pending_leaves(company_id)
     return odoo.pending_leaves(company_id, manager_hr_id=emp["hr_employee_id"])

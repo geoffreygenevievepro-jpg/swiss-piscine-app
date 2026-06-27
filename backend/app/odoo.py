@@ -749,7 +749,12 @@ _emp_company_cache: dict[int, int] = {}
 
 
 def employee_company_id(hr_employee_id: int) -> int:
-    """Société (res.company id) de l'employé connecté. Repli : société configurée."""
+    """Société (res.company id) de l'employé connecté. Repli : société configurée.
+
+    Cache sans TTL volontaire : la société d'un employé ne change quasi jamais ;
+    reset automatique au redémarrage du process. On ne met en cache que les succès —
+    une exception Odoo transitoire ne doit pas épingler l'employé sur la mauvaise société.
+    """
     if hr_employee_id not in _emp_company_cache:
         try:
             rows = get_client().execute_kw("hr.employee", "read", [[hr_employee_id]],
@@ -757,7 +762,9 @@ def employee_company_id(hr_employee_id: int) -> int:
             c = rows[0].get("company_id") if rows else None
             _emp_company_cache[hr_employee_id] = c[0] if c else settings.company_id
         except Exception:
-            _emp_company_cache[hr_employee_id] = settings.company_id
+            # Repli sans écriture dans le cache : une erreur transitoire ne doit pas
+            # mémoriser la mauvaise société jusqu'au prochain redémarrage.
+            return settings.company_id
     return _emp_company_cache[hr_employee_id]
 
 
@@ -797,7 +804,11 @@ def create_partner(name: str, zip_code: str | None = None, city: str | None = No
                    street: str | None = None, phone: str | None = None,
                    email: str | None = None) -> int:
     """Crée un client (res.partner) et renvoie son id. ÉCRITURE — réservée à la
-    création d'une intervention imprévue avec un nouveau client."""
+    création d'une intervention imprévue avec un nouveau client.
+
+    Les partenaires sont créés sans company_id = partagés entre sociétés, par design
+    (cohérent avec search_partners qui inclut company_id=False dans son domaine).
+    """
     vals = {"name": name}
     if zip_code:
         vals["zip"] = zip_code
@@ -983,10 +994,14 @@ def _create_next_activity(rw, model: str, rid: int, next_action: str | None,
         return False
 
 
-def search_report_products(query: str, limit: int = 20) -> list[dict]:
-    """Recherche de produits/pièces (product.product) pour la checklist du rapport."""
+def search_report_products(query: str, company_id: int, limit: int = 20) -> list[dict]:
+    """Recherche de produits/pièces (product.product) pour la checklist du rapport.
+
+    Filtre par company_id fourni par l'appelant (société de l'employé courant) afin
+    qu'un employé non-SP ne voie pas le catalogue d'une autre société.
+    """
     ro = get_client()
-    domain = ["|", ["company_id", "=", settings.company_id], ["company_id", "=", False],
+    domain = ["|", ["company_id", "=", company_id], ["company_id", "=", False],
               ["name", "ilike", query]]
     return ro.execute_kw(
         "product.product", "search_read", [domain],
