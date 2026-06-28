@@ -61,6 +61,7 @@ export function renderLogin(root, onSuccess) {
             profile.set(await getMe());
             onSuccess();
           },
+          onCancel: () => renderLogin(root, onSuccess),
         });
         return;
       }

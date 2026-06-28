@@ -53,6 +53,7 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5500",
         "http://localhost:8080",
         "https://app.swiss-piscine.ch",
+        "https://equipe.heiwa-solution.ch",
     ]
 
     # SQLite (comptes employés + refresh tokens)

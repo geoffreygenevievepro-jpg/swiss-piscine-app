@@ -54,7 +54,7 @@ function wrapCard(title, body) {
 // ---------------------------------------------------------------------------
 // Mode verify : on connaît déjà la méthode 2FA de l'employé
 // ---------------------------------------------------------------------------
-async function renderVerify(root, { pendingToken, isEmail, onDone }) {
+async function renderVerify(root, { pendingToken, isEmail, onDone, onCancel }) {
   const resendBlock = isEmail
     ? `<button type="button" class="btn secondary" id="tfa-resend" style="min-height:40px">Renvoyer le code</button>`
     : "";
@@ -71,11 +71,14 @@ async function renderVerify(root, { pendingToken, isEmail, onDone }) {
       </label>
       ${resendBlock}
       <button class="btn" type="submit" id="tfa-btn">Vérifier</button>
-    </form>`);
+    </form>
+    <button type="button" class="btn secondary" id="tfa-back" style="min-height:40px;margin-top:10px">‹ Retour</button>`);
 
   const errEl = root.querySelector("#tfa-error");
   const btn = root.querySelector("#tfa-btn");
   const form = root.querySelector("#tfa-form");
+  const back = root.querySelector("#tfa-back");
+  if (back && onCancel) back.addEventListener("click", () => onCancel());
 
   if (isEmail) {
     // I2 — envoyer automatiquement le code à l'arrivée sur l'écran verify email
@@ -131,7 +134,7 @@ async function renderVerify(root, { pendingToken, isEmail, onDone }) {
 // ---------------------------------------------------------------------------
 // Mode setup — choix de la méthode puis configuration
 // ---------------------------------------------------------------------------
-async function renderSetup(root, { pendingToken, onDone }) {
+async function renderSetup(root, { pendingToken, onDone, onCancel }) {
   // Récupérer le statut pour savoir si can_email
   let canEmail = false;
   try {
@@ -146,16 +149,22 @@ async function renderSetup(root, { pendingToken, onDone }) {
       <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
         <button class="btn" id="choose-totp">Authenticator (application)</button>
         <button class="btn secondary" id="choose-email">Email</button>
-      </div>`);
-    root.querySelector("#choose-totp").addEventListener("click", () => setupTotp(root, { pendingToken, onDone }));
-    root.querySelector("#choose-email").addEventListener("click", () => setupEmail(root, { pendingToken, onDone }));
+      </div>
+      <button type="button" class="btn secondary" id="tfa-back" style="min-height:40px;margin-top:10px">‹ Retour à la connexion</button>`);
+    // Depuis une méthode, « Retour » ramène à cet écran de choix.
+    const backToChoice = () => renderSetup(root, { pendingToken, onDone, onCancel });
+    root.querySelector("#choose-totp").addEventListener("click", () => setupTotp(root, { pendingToken, onDone, onBack: backToChoice }));
+    root.querySelector("#choose-email").addEventListener("click", () => setupEmail(root, { pendingToken, onDone, onBack: backToChoice }));
+    const back = root.querySelector("#tfa-back");
+    if (back && onCancel) back.addEventListener("click", () => onCancel());
   } else {
-    await setupTotp(root, { pendingToken, onDone });
+    // Pas de choix : Authenticator direct, « Retour » ramène à la connexion.
+    await setupTotp(root, { pendingToken, onDone, onBack: onCancel });
   }
 }
 
 // --- TOTP setup ---
-async function setupTotp(root, { pendingToken, onDone }) {
+async function setupTotp(root, { pendingToken, onDone, onBack }) {
   root.innerHTML = wrapCard("Configurer Authenticator", `<div class="placeholder">Chargement…</div>`);
   const errEl = root.querySelector("#tfa-error");
 
@@ -193,10 +202,13 @@ async function setupTotp(root, { pendingToken, onDone }) {
         <input type="checkbox" id="tfa-trust"> Faire confiance à cet appareil (30 jours)
       </label>
       <button class="btn" type="submit" id="tfa-btn">Confirmer</button>
-    </form>`;
+    </form>
+    <button type="button" class="btn secondary" id="tfa-back" style="min-height:40px;margin-top:10px">‹ Retour</button>`;
 
   const errEl2 = root.querySelector("#tfa-error");
   const btn = root.querySelector("#tfa-btn");
+  const back = root.querySelector("#tfa-back");
+  if (back && onBack) back.addEventListener("click", () => onBack());
   root.querySelector("#tfa-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     errEl2.textContent = "";
@@ -215,7 +227,7 @@ async function setupTotp(root, { pendingToken, onDone }) {
 }
 
 // --- Email setup ---
-async function setupEmail(root, { pendingToken, onDone }) {
+async function setupEmail(root, { pendingToken, onDone, onBack }) {
   root.innerHTML = wrapCard("Configurer 2FA par email", `<div class="placeholder">Envoi du code…</div>`);
   const errEl = root.querySelector("#tfa-error");
 
@@ -241,11 +253,14 @@ async function setupEmail(root, { pendingToken, onDone }) {
       </label>
       <button type="button" class="btn secondary" id="tfa-resend" style="min-height:40px">Renvoyer le code</button>
       <button class="btn" type="submit" id="tfa-btn">Confirmer</button>
-    </form>`;
+    </form>
+    <button type="button" class="btn secondary" id="tfa-back" style="min-height:40px;margin-top:10px">‹ Retour</button>`;
 
   const errEl2 = root.querySelector("#tfa-error");
   const btn = root.querySelector("#tfa-btn");
   const resend = root.querySelector("#tfa-resend");
+  const back = root.querySelector("#tfa-back");
+  if (back && onBack) back.addEventListener("click", () => onBack());
 
   resend.addEventListener("click", async () => {
     resend.disabled = true;
@@ -284,7 +299,7 @@ async function setupEmail(root, { pendingToken, onDone }) {
 // ---------------------------------------------------------------------------
 // opts : { mode: "setup"|"verify", pendingToken: string, onDone: fn(tokenResponse) }
 // onDone reçoit {access_token, refresh_token, expires_in} et doit appeler tokens.set + profile.set.
-export async function mountTwofa(root, { mode, pendingToken, onDone }) {
+export async function mountTwofa(root, { mode, pendingToken, onDone, onCancel }) {
   document.body.classList.add("screen-login");
   root.innerHTML = `<div class="login-wrap"><div class="login-card"><div class="placeholder">Chargement…</div></div></div>`;
 
@@ -295,7 +310,7 @@ export async function mountTwofa(root, { mode, pendingToken, onDone }) {
 
   if (mode === "setup") {
     // Peut-être que la méthode verify est email — on vérifie lors du setup
-    await renderSetup(root, { pendingToken, onDone: done });
+    await renderSetup(root, { pendingToken, onDone: done, onCancel });
   } else {
     // mode verify : récupérer la méthode pour savoir si bouton "renvoyer"
     let isEmail = false;
@@ -303,6 +318,6 @@ export async function mountTwofa(root, { mode, pendingToken, onDone }) {
       const status = await twofaApi("/2fa/status", { method: "GET", pendingToken });
       isEmail = status.method === "email";
     } catch {}
-    await renderVerify(root, { pendingToken, isEmail, onDone: done });
+    await renderVerify(root, { pendingToken, isEmail, onDone: done, onCancel });
   }
 }
