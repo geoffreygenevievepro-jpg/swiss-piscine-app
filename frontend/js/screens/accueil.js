@@ -145,13 +145,8 @@ async function loadMeteo(dash) {
 // --- Actions rapides ---------------------------------------------------------
 function quickActions(status) {
   const tile = (act, ic, bg, label) => `<button class="qa dash-act" data-act="${act}"><span class="qbadge ${bg}">${icon(ic)}</span><b>${label}</b></button>`;
-  const isIn = status && status.state === "in";
-  const timbrage = isIn
-    ? `<button class="qa dash-act qa-timbrage qa-out" data-act="entrer"><span class="qbadge">${icon("stop")}</span><b>Sortie</b></button>`
-    : `<button class="qa dash-act qa-timbrage qa-in" data-act="entrer"><span class="qbadge">${icon("play")}</span><b>Entrer</b></button>`;
   return `<div class="card">
     <div class="eyebrow">Actions rapides</div>
-    ${timbrage}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px">
       ${tile("conges", "leaf", "bg-green", "Demande de congé")}
       ${tile("intervention", "tools", "bg-aqua", "Mon intervention")}
