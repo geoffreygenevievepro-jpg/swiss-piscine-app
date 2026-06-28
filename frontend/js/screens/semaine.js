@@ -100,7 +100,7 @@ async function openReport(root, slotId) {
   try { s = await api(`/interventions/${slotId}`); }
   catch { await load(root); toast("Intervention introuvable."); return; }
   renderReport(root, {
-    slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime },
+    slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime, project_id: s.project_id, task_id: s.task_id },
     onDone: () => semaine.render(root),
   });
 }

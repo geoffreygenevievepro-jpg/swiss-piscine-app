@@ -148,8 +148,8 @@ async function renderDetail(root, slotId) {
   root.querySelector("#back").addEventListener("click", () => terrain.render(root));
   const back = (msg) => { terrain.render(root); if (msg) toast(msg); };
   root.querySelector("#do-start").addEventListener("click", () =>
-    renderReport(root, { slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime }, autoStart: true, onDone: back }));
+    renderReport(root, { slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime, project_id: s.project_id, task_id: s.task_id }, autoStart: true, onDone: back }));
   root.querySelector("#do-report").addEventListener("click", () =>
-    renderReport(root, { slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime }, onDone: back }));
+    renderReport(root, { slot: { id: slotId, label: s.label, partner_id: s.partner_id, partner: s.partner, employee_ids: s.employee_ids, start_datetime: s.start_datetime, end_datetime: s.end_datetime, project_id: s.project_id, task_id: s.task_id }, onDone: back }));
 }
 

@@ -244,6 +244,20 @@ export async function renderReport(root, ctx = {}) {
   });
   taskSel.addEventListener("change", () => { state.task = taskSel.value ? Number(taskSel.value) : null; });
 
+  // Pré-remplir Projet/Tâche depuis le créneau déjà planifié dans Odoo (mode slot).
+  if (!create && Array.isArray(slot.project_id) && slot.project_id[0]) {
+    state.project = slot.project_id[0]; state.projectName = slot.project_id[1];
+    pj.value = slot.project_id[1];
+    (async () => {
+      try {
+        const tasks = await api(`/projects/${state.project}/tasks`);
+        taskSel.innerHTML = `<option value="">— Choisir une tâche —</option>` + tasks.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+        if (Array.isArray(slot.task_id) && slot.task_id[0]) { state.task = slot.task_id[0]; taskSel.value = String(slot.task_id[0]); }
+        taskWrap.style.display = "block";
+      } catch {}
+    })();
+  }
+
   // --- Type (chips) ---
   const typesWrap = root.querySelector("#r-types");
   typesWrap.addEventListener("click", (e) => {
