@@ -637,6 +637,15 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
             presence = (cutoff - pstart).days + 1 if cutoff >= pstart else 0
             net = max(presence - absences, 0)
             theo_du, repos_dus = net / 7 * weekly, net / 7 * 2
+            cur_month = cutoff.month
+            m0 = date(year, cur_month, 1)
+            ms = max(pstart, m0)
+            if ms <= cutoff:
+                mdays = (cutoff - ms).days + 1
+                mabs = sum(1 for iso, cat in leave_by_day.items() if cat in absc and ms <= date.fromisoformat(iso) <= cutoff)
+                seg_mois = [(max(mdays - mabs, 0), weekly)]
+            else:
+                seg_mois = []
         vac_droit = 0.0
         try:
             al = ro.execute_kw(
