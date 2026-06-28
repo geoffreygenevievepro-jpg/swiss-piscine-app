@@ -60,3 +60,11 @@ def test_ccnt_resolves_company_via_odoo_when_null(monkeypatch):
     app.dependency_overrides.clear()
     assert r.status_code == 200
     assert r.json().get("enabled") is True
+
+
+def test_feries_split():
+    # 4 fériés ; 1 tombe un jour travaillé -> à rattraper ; 3 perçus
+    feries = ["2026-01-01", "2026-03-19", "2026-05-14", "2026-06-04"]
+    worked = {"2026-03-19", "2026-06-10"}  # 03-19 est un férié travaillé
+    assert odoo._feries_split(feries, worked) == {"percus": 3, "a_rattraper": 1}
+    assert odoo._feries_split([], set()) == {"percus": 0, "a_rattraper": 0}

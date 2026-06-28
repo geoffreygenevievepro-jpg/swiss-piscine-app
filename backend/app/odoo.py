@@ -464,6 +464,13 @@ def _ccnt_leave_cat(name: str | None) -> str:
     return "conge"
 
 
+def _feries_split(ferie_dates: list[str], worked_dates: set[str]) -> dict:
+    """Fériés perçus vs à rattraper : un férié tombé un jour TRAVAILLÉ (timbrage > 0)
+    est dû en compensatoire (à rattraper) ; sinon il est perçu (jour de congé reçu)."""
+    a_rattraper = sum(1 for d in ferie_dates if d in worked_dates)
+    return {"percus": len(ferie_dates) - a_rattraper, "a_rattraper": a_rattraper}
+
+
 def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
     """Données CCNT annuelles pour l'onglet Présence : heures timbrées par mois +
     calendrier des types de jour. Sources : hr.attendance (heures réelles timbrées),
@@ -574,6 +581,11 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
         worked_h = round(sum(h for iso, h in worked_by_day.items() if date.fromisoformat(iso) <= cutoff), 1)
         worked_d = sum(1 for iso, h in worked_by_day.items() if h > 0 and date.fromisoformat(iso) <= cutoff)
         absences = sum(absc.values())
+        # fériés perçus / à rattraper (à ce jour)
+        ferie_dates_td = [iso for iso in holiday_days if date.fromisoformat(iso) <= cutoff]
+        worked_dates_td = {iso for iso, h in worked_by_day.items()
+                           if h > 0 and date.fromisoformat(iso) <= cutoff}
+        feries = _feries_split(ferie_dates_td, worked_dates_td)
         # théorique & repos dus PAR PÉRIODE DE CONTRAT (hr.version) : chaque période × son %
         theo_du, repos_dus, presence, periodes = 0.0, 0.0, 0, []
         try:
@@ -623,6 +635,7 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
             "heures": {"fait": worked_h, "du": round(theo_du, 1)},
             "vacances": {"pris": absc["vac"], "droit": vac_droit},
             "repos": {"pris": max(presence - worked_d - absences - ferie_td, 0), "dus": round(repos_dus, 1)},
+            "feries": feries,
             "periodes": periodes,
         }
 
