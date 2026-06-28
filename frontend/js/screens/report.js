@@ -175,6 +175,12 @@ export async function renderReport(root, ctx = {}) {
 
   root.querySelector("#r-back").addEventListener("click", onDone);
 
+  // Ouvre le calendrier/sélecteur d'heure directement au clic sur le champ.
+  root.querySelectorAll('input[type="date"], input[type="time"]').forEach(inp => {
+    const open = () => { if (typeof inp.showPicker === "function") { try { inp.showPicker(); } catch {} } };
+    inp.addEventListener("click", open);
+  });
+
   // --- Client (mode create) ---
   if (create) {
     const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,"0")}-${String(n.getDate()).padStart(2,"0")}`; };
@@ -386,7 +392,6 @@ export async function renderReport(root, ctx = {}) {
     if (!state.type) { err.textContent = "Choisis un type d'intervention."; return; }
     if (!state.status) { err.textContent = "Choisis le statut de la tâche."; return; }
     const photos = state.photos.filter(Boolean);
-    if (photos.length < 2) { err.textContent = "Ajoute au moins 2 photos."; return; }
 
     const parts = state.products.map(p => p.name).filter(Boolean);
     const billable = state.products.filter(p => p.billable);
