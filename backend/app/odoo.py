@@ -667,9 +667,8 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
         "role_id": ROLE_TECHNICIEN_ID,
         "name": label,
     }
-    rids = [int(r) for r in (resource_ids or [])]
-    if rids:
-        vals["resource_id"] = rids[0]
+    # NB : l'équipe est portée par employee_ids ci-dessus. planning.slot n'a PAS de
+    # champ resource_id (Odoo saas-19.2) → ne rien écrire dessus (resource_ids reçu mais non utilisé).
     if partner_id:
         vals["partner_id"] = partner_id
     rw = get_write_client()

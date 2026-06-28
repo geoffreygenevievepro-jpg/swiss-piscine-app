@@ -43,12 +43,12 @@ def test_match_birthdays_feb29_on_feb28_non_leap():
 
 # --- Endpoint --------------------------------------------------------------
 def test_birthdays_today_endpoint(monkeypatch):
-    monkeypatch.setattr(odoo, "list_employees", lambda: [{"id": 1, "name": "Niyongira Fanny"}])
+    monkeypatch.setattr(odoo, "list_employees", lambda cid: [{"id": 1, "name": "Niyongira Fanny"}] if cid == 5 else [])
     cli = MagicMock()
     cli.execute_kw.return_value = [{"id": 1, "name": "Niyongira Fanny", "birthday": "1990-06-27"}]
     monkeypatch.setattr(odoo, "get_client", lambda: cli)
     monkeypatch.setattr(bd, "_today_zurich", lambda: date(2026, 6, 27))
-    app.dependency_overrides[get_current_employee] = lambda: {"hr_employee_id": 1, "name": "Niyongira Fanny"}
+    app.dependency_overrides[get_current_employee] = lambda: {"hr_employee_id": 1, "name": "Niyongira Fanny", "company_id": 5}
     r = client.get("/birthdays/today")
     app.dependency_overrides.clear()
     assert r.status_code == 200
@@ -56,12 +56,12 @@ def test_birthdays_today_endpoint(monkeypatch):
 
 
 def test_birthdays_today_empty(monkeypatch):
-    monkeypatch.setattr(odoo, "list_employees", lambda: [{"id": 1, "name": "Niyongira Fanny"}])
+    monkeypatch.setattr(odoo, "list_employees", lambda cid: [{"id": 1, "name": "Niyongira Fanny"}] if cid == 5 else [])
     cli = MagicMock()
     cli.execute_kw.return_value = [{"id": 1, "name": "Niyongira Fanny", "birthday": "1990-01-01"}]
     monkeypatch.setattr(odoo, "get_client", lambda: cli)
     monkeypatch.setattr(bd, "_today_zurich", lambda: date(2026, 6, 27))
-    app.dependency_overrides[get_current_employee] = lambda: {"hr_employee_id": 1, "name": "X"}
+    app.dependency_overrides[get_current_employee] = lambda: {"hr_employee_id": 1, "name": "X", "company_id": 5}
     r = client.get("/birthdays/today")
     app.dependency_overrides.clear()
     assert r.status_code == 200
