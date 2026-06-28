@@ -10,6 +10,14 @@ from ..security import hash_pin, verify_pin
 
 router = APIRouter(tags=["me"])
 
+# Couleur d'accent par défaut par société (Supabase app_rh_company_config peut surcharger).
+DEFAULT_COMPANY_COLORS = {
+    5: "#0c5e68",  # Swiss Piscine — teal
+    4: "#2f7d4f",  # Elie Paysage — vert (paysagisme)
+    1: "#b07d2a",  # Heiwa Hospitality Concept — or
+}
+DEFAULT_COLOR = "#0c5e68"
+
 
 class PermitScan(BaseModel):
     data: str = Field(..., min_length=10)   # base64 (data URL acceptée)
@@ -39,7 +47,7 @@ def me(emp=Depends(get_current_employee)):
     )["effective_tabs"]
 
     branding = odoo.company_branding(cid)
-    color = supabase_access.company_theme_color(cid) or "#0c5e68"
+    color = supabase_access.company_theme_color(cid) or DEFAULT_COMPANY_COLORS.get(cid, DEFAULT_COLOR)
 
     return {
         "id": emp["id"],
