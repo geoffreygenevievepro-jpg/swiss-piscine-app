@@ -129,9 +129,9 @@ export async function renderReport(root, ctx = {}) {
         </div>
         <input id="rp-qty" type="number" min="0" step="any" value="1" aria-label="Quantité" style="width:62px;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:0 8px;text-align:center">
         <input id="rp-price" type="number" min="0" step="any" placeholder="Prix" aria-label="Prix" style="width:84px;min-height:44px;border:1px solid var(--line);border-radius:10px;padding:0 8px;text-align:right">
-        <label style="display:flex;align-items:center;gap:4px;font-size:.8rem;color:var(--muted)"><input id="rp-bill" type="checkbox" style="width:18px;height:18px;accent-color:var(--aqua-dark)">à facturer</label>
         <button type="button" class="btn" id="rp-add" style="width:auto;min-height:44px;padding:0 16px">${icon("plus")}</button>
       </div>
+      <div style="font-size:.74rem;color:var(--muted);margin-top:6px">Pour facturer ces produits, ajoute le tag « à facturer » plus bas.</div>
       <div style="display:flex;gap:10px;margin-top:12px">
         <label style="flex:1;font-size:.8rem;color:var(--muted)">Remise %<input id="rp-disc" type="number" min="0" step="any" value="0" style="width:100%;min-height:40px;border:1px solid var(--line);border-radius:10px;padding:0 8px;margin-top:4px"></label>
         <label style="flex:1;font-size:.8rem;color:var(--muted)">TVA %<input id="rp-vat" type="number" min="0" step="any" value="8.1" style="width:100%;min-height:40px;border:1px solid var(--line);border-radius:10px;padding:0 8px;margin-top:4px"></label>
@@ -338,7 +338,7 @@ export async function renderReport(root, ctx = {}) {
   // --- Pièces / produits facturables ---
   const fmtCHF = (n) => n.toLocaleString("fr-CH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const pName = root.querySelector("#rp-name"), pQty = root.querySelector("#rp-qty"), pPrice = root.querySelector("#rp-price");
-  const pBill = root.querySelector("#rp-bill"), pResults = root.querySelector("#rp-results");
+  const pResults = root.querySelector("#rp-results");
   const pLines = root.querySelector("#r-plines"), pTotals = root.querySelector("#rp-totals");
   const pDisc = root.querySelector("#rp-disc"), pVat = root.querySelector("#rp-vat");
   let selPid = null;
@@ -346,24 +346,23 @@ export async function renderReport(root, ctx = {}) {
     pLines.innerHTML = state.products.length
       ? state.products.map((p, i) => {
           return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line)">
-            <span style="flex:1;min-width:0">${escapeHtml(p.name)}${p.billable ? ` <span class="chip active" style="padding:1px 6px;font-size:.7rem">à facturer</span>` : ""}<span style="color:var(--muted);font-size:.8rem"> · ${Number(p.qty) || 0} × ${p.price != null ? fmtCHF(Number(p.price)) : "—"}</span></span>
+            <span style="flex:1;min-width:0">${escapeHtml(p.name)}<span style="color:var(--muted);font-size:.8rem"> · ${Number(p.qty) || 0} × ${p.price != null ? fmtCHF(Number(p.price)) : "—"}</span></span>
             <button type="button" data-rmp="${i}" style="border:0;background:none;cursor:pointer;color:var(--muted);display:flex">${icon("x", "icon-sm")}</button>
           </div>`;
         }).join("")
       : `<p style="color:var(--muted);margin:0;font-size:.86rem">Aucune pièce ajoutée.</p>`;
-    const bill = state.products.filter(p => p.billable);
-    const subtotal = bill.reduce((s, p) => s + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
+    const subtotal = state.products.reduce((s, p) => s + (Number(p.qty) || 0) * (Number(p.price) || 0), 0);
     const disc = Number(pDisc.value) || 0, vat = Number(pVat.value) || 0;
     const discAmt = subtotal * disc / 100, after = subtotal - discAmt, vatAmt = after * vat / 100, total = after + vatAmt;
     const line = (l, v, strong) => `<div style="display:flex;justify-content:space-between;${strong ? "font-weight:700;font-size:1.05rem;margin-top:4px;color:var(--navy)" : "color:var(--muted);font-size:.88rem"}"><span>${l}</span><span>${fmtCHF(v)} CHF</span></div>`;
-    pTotals.innerHTML = bill.length ? line("Sous-total à facturer", subtotal) + (disc ? line(`Remise ${disc}%`, -discAmt) : "") + line(`TVA ${vat}%`, vatAmt) + line("Total", total, true) : "";
+    pTotals.innerHTML = state.products.length ? line("Sous-total", subtotal) + (disc ? line(`Remise ${disc}%`, -discAmt) : "") + line(`TVA ${vat}%`, vatAmt) + line("Total", total, true) : "";
   }
   pDisc.addEventListener("input", renderProducts);
   pVat.addEventListener("input", renderProducts);
   root.querySelector("#rp-add").addEventListener("click", () => {
     const name = pName.value.trim(); if (!name) return;
-    state.products.push({ name, qty: Number(pQty.value) || 1, price: pPrice.value !== "" ? Number(pPrice.value) : null, product_id: selPid, billable: pBill.checked });
-    pName.value = ""; pQty.value = "1"; pPrice.value = ""; pBill.checked = false; pResults.innerHTML = ""; selPid = null; renderProducts(); pName.focus();
+    state.products.push({ name, qty: Number(pQty.value) || 1, price: pPrice.value !== "" ? Number(pPrice.value) : null, product_id: selPid });
+    pName.value = ""; pQty.value = "1"; pPrice.value = ""; pResults.innerHTML = ""; selPid = null; renderProducts(); pName.focus();
   });
   pLines.addEventListener("click", (e) => { const b = e.target.closest("[data-rmp]"); if (!b) return; state.products.splice(Number(b.dataset.rmp), 1); renderProducts(); });
   let pTmr = null;
@@ -408,7 +407,6 @@ export async function renderReport(root, ctx = {}) {
     const photos = state.photos.filter(Boolean);
 
     const parts = state.products.map(p => p.name).filter(Boolean);
-    const billable = state.products.filter(p => p.billable);
     const remarques = root.querySelector("#r-remarques").value.trim() || null;
     const notes = root.querySelector("#r-notes").value.trim() || null;
     const materials = root.querySelector("#r-materials").value.trim() || null;
@@ -432,7 +430,7 @@ export async function renderReport(root, ctx = {}) {
           start_time: root.querySelector("#r-start-t").value,
           end_time: root.querySelector("#r-end-t").value,
           partner_id: pid ? Number(pid) : null, client_name: cname,
-          photos, parts, products: billable, discount, vat_rate: vat,
+          photos, parts, products: state.products, discount, vat_rate: vat,
           tag_ids: state.tags, worker_ids: state.workers, resource_ids: state.resources,
           project_id: state.project, task_id: state.task,
           signature, status: state.status, remarques,
@@ -460,7 +458,7 @@ export async function renderReport(root, ctx = {}) {
         }
         const payload = {
           type: state.type, notes, materials, schedule, hours, photos, signature,
-          parts, products: billable, discount, vat_rate: vat,
+          parts, products: state.products, discount, vat_rate: vat,
           tag_ids: state.tags, worker_ids: state.workers, resource_ids: state.resources,
           project_id: state.project, task_id: state.task,
           status: state.status, remarques, next_action, next_action_date,

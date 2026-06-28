@@ -58,8 +58,8 @@ def test_submit_report_invoices_with_company(monkeypatch):
         return 999
 
     monkeypatch.setattr(odoo, "create_draft_invoice", fake_inv)
-    report = {"type": "Entretien", "discount": 0,
-              "products": [{"name": "Filtre", "qty": 1, "price": 80.0, "billable": True}]}
+    report = {"type": "Entretien", "discount": 0, "tag_ids": [67],   # tag « à facturer »
+              "products": [{"name": "Filtre", "qty": 1, "price": 80.0}]}
     res = odoo.submit_report(1, "Alex", 5, report)
     assert res["invoice"] is True and res["invoice_id"] == 999
     assert seen["company_id"] == 5 and seen["partner_id"] == 42
@@ -76,6 +76,20 @@ def test_submit_report_no_invoice_without_products(monkeypatch):
     monkeypatch.setattr(odoo, "create_draft_invoice",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("ne doit pas facturer")))
     res = odoo.submit_report(1, "Alex", 5, {"type": "Entretien", "products": []})
+    assert res["invoice"] is False and res["invoice_id"] is None
+
+
+def test_submit_report_no_invoice_without_tag(monkeypatch):
+    # produits présents MAIS pas de tag « à facturer » → pas de facture
+    ro = MagicMock(); ro.execute_kw.return_value = _slot_rows()
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 5)
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    monkeypatch.setattr(odoo, "get_write_client", lambda: MagicMock())
+    monkeypatch.setattr(odoo, "_fill_worksheet", lambda *a, **k: None)
+    monkeypatch.setattr(odoo, "create_draft_invoice",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("ne doit pas facturer sans tag")))
+    res = odoo.submit_report(1, "Alex", 5, {"type": "Entretien", "tag_ids": [],
+                                            "products": [{"name": "Filtre", "qty": 1, "price": 80.0}]})
     assert res["invoice"] is False and res["invoice_id"] is None
 
 
@@ -127,8 +141,8 @@ def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
                         lambda p, prods, disc, origin=None, company_id=None, slot_id=None: inv.update(p=p, cid=company_id, slot=slot_id) or 777)
     res = odoo.create_intervention(
         1, "desc", "2026-06-27 06:00:00", "2026-06-27 08:00:00",
-        partner_id=42, type_label="Entretien",
-        products=[{"name": "Filtre", "qty": 1, "price": 80.0, "billable": True}],
+        partner_id=42, type_label="Entretien", tag_ids=[67],   # tag « à facturer »
+        products=[{"name": "Filtre", "qty": 1, "price": 80.0}],
         parts=["Filtre", "Vis"], resource_ids=[7], remarques="RAS")
     create_vals = rw.execute_kw.call_args_list[0].args[2][0]
     # planning.slot.employee_ids est CALCULÉ → on n'écrit ni resource_id ni employee_ids.

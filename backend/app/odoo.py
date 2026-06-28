@@ -946,10 +946,9 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
     except Exception:
         worksheet_ok = False
 
-    # --- Facturation : facture client BROUILLON pour les lignes « à facturer » ---
-    # `products` reçues = déjà les lignes facturables (filtrées côté app).
+    # --- Facturation : facture client BROUILLON, déclenchée par le TAG « à facturer » ---
     invoice_id = None
-    billable = bool(products)
+    billable = bool(products) and any((n or "").strip().lower() == "à facturer" for n in tag_names)
     if billable:
         bill_partner = partner_id
         if not bill_partner and client_name:
@@ -1409,11 +1408,12 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     except Exception:
         worksheet_ok = False
 
-    # Facture brouillon — lignes « à facturer » du rapport (additif). Le partner
+    # Facture brouillon — déclenchée par le TAG « à facturer » + produits. Le partner
     # vient du créneau ; la société est celle de l'employé (déjà résolue).
     invoice_id = None
     products = report.get("products") or []
-    if products and slot.get("partner_id"):
+    wants_invoice = any((n or "").strip().lower() == "à facturer" for n in (report.get("tag_names") or []))
+    if products and wants_invoice and slot.get("partner_id"):
         try:
             invoice_id = create_draft_invoice(
                 slot["partner_id"][0], products,
