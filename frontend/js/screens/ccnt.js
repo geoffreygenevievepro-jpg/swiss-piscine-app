@@ -29,6 +29,7 @@ function injectStyle() {
    .ccnt-dec tr:first-child td{border-top:0}
    .ccnt-dec td.n{text-align:right;font-weight:800;color:var(--navy);font-family:var(--font-display)}
    .ccnt-dec td.n small{color:var(--muted);font-weight:600;font-size:.8rem}
+   .ccnt-contrat{font-size:.68rem;color:var(--muted);text-align:right;margin:-6px 2px 10px}
    .ccnt-months{display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px}
    .ccnt-months button{flex:0 0 auto;border:1px solid var(--line);background:#fff;color:var(--muted);font-size:.7rem;padding:5px 9px;border-radius:8px;cursor:pointer}
    .ccnt-months button.on{background:var(--aqua-dark);color:#fff;border-color:var(--aqua-dark)}
@@ -91,6 +92,9 @@ export async function renderCcnt(host) {
   let summary;
   if (dec) {  // employé AU % : décompte « réalisé / dû » à ce jour
     const avance = (dec.heures.fait || 0) - (dec.heures.du || 0);
+    const pers = dec.periodes || [];
+    const contrat = pers.length === 1 ? `Contrat ${pers[0].pct}%`
+      : pers.length > 1 ? `Contrat ${pers.map((p) => p.pct + "%").join(" puis ")}` : "";
     summary = `
       <div class="ccnt-hero">
         <span class="eb">Heures travaillées ${data.year} — à ce jour</span>
@@ -101,7 +105,8 @@ export async function renderCcnt(host) {
         <tr><td>Jours travaillés</td><td class="n">${dec.jours_travailles}</td></tr>
         <tr><td>Vacances prises</td><td class="n">${f1(dec.vacances.pris)} <small>sur ${f1(dec.vacances.droit)}</small></td></tr>
         <tr><td>Jours de repos</td><td class="n">${f1(dec.repos.pris)} <small>sur ${f1(dec.repos.dus)}</small></td></tr>
-      </table>`;
+      </table>
+      ${contrat ? `<div class="ccnt-contrat">${contrat}</div>` : ""}`;
   } else {  // employé À L'HEURE : heures timbrées, pas de décompte théorique
     summary = `
       <div class="ccnt-hero">

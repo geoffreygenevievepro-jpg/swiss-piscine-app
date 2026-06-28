@@ -458,8 +458,6 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
             hire_d = datetime.fromisoformat(str(hire)[:10]).date() if hire else y0
         except (ValueError, TypeError):
             hire_d = y0
-        pstart = max(hire_d, y0)
-        presence = (cutoff - pstart).days + 1 if cutoff >= pstart else 0
         absc = {"vac": 0, "mal": 0, "mat": 0, "acc": 0, "mil": 0}
         for iso, cat in leave_by_day.items():
             if cat in absc and date.fromisoformat(iso) <= cutoff:
@@ -468,7 +466,40 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
         worked_h = round(sum(h for iso, h in worked_by_day.items() if date.fromisoformat(iso) <= cutoff), 1)
         worked_d = sum(1 for iso, h in worked_by_day.items() if h > 0 and date.fromisoformat(iso) <= cutoff)
         absences = sum(absc.values())
-        net = max(presence - absences, 0)
+        # théorique & repos dus PAR PÉRIODE DE CONTRAT (hr.version) : chaque période × son %
+        theo_du, repos_dus, presence, periodes = 0.0, 0.0, 0, []
+        try:
+            vers = ro.execute_kw("hr.version", "search_read", [[["employee_id", "=", hr_employee_id]]],
+                                 {"fields": ["date_start", "date_end", "resource_calendar_id"]})
+            cal_ids = list({v["resource_calendar_id"][0] for v in vers if v.get("resource_calendar_id")})
+            cal_h = {c["id"]: (c.get("hours_per_week") or 0.0)
+                     for c in (ro.execute_kw("resource.calendar", "read", [cal_ids], {"fields": ["hours_per_week"]}) if cal_ids else [])}
+            for v in vers:
+                if not v.get("resource_calendar_id"):
+                    continue
+                try:
+                    vs = datetime.fromisoformat(str(v["date_start"])[:10]).date() if v.get("date_start") else y0
+                    ve = datetime.fromisoformat(str(v["date_end"])[:10]).date() if v.get("date_end") else cutoff
+                except (ValueError, TypeError):
+                    continue
+                ps, pe = max(vs, y0), min(ve, cutoff)
+                if ps > pe:
+                    continue
+                pdays = (pe - ps).days + 1
+                pabs = sum(1 for iso, cat in leave_by_day.items() if cat in absc and ps <= date.fromisoformat(iso) <= pe)
+                pw = cal_h.get(v["resource_calendar_id"][0], 0.0)
+                net_p = max(pdays - pabs, 0)
+                theo_du += net_p / 7 * pw
+                repos_dus += net_p / 7 * 2
+                presence += pdays
+                periodes.append({"du": str(ps), "au": str(pe), "pct": round(pw / 42 * 100) if pw else 0})
+        except Exception:
+            periodes = []
+        if not periodes:  # repli : pas d'historique de contrat → calcul simple (calendrier courant)
+            pstart = max(hire_d, y0)
+            presence = (cutoff - pstart).days + 1 if cutoff >= pstart else 0
+            net = max(presence - absences, 0)
+            theo_du, repos_dus = net / 7 * weekly, net / 7 * 2
         vac_droit = 0.0
         try:
             al = ro.execute_kw(
@@ -481,9 +512,10 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
         decompte = {
             "presence": presence,
             "jours_travailles": worked_d,
-            "heures": {"fait": worked_h, "du": round(net / 7 * weekly, 1)},
+            "heures": {"fait": worked_h, "du": round(theo_du, 1)},
             "vacances": {"pris": absc["vac"], "droit": vac_droit},
-            "repos": {"pris": max(presence - worked_d - absences - ferie_td, 0), "dus": round(net / 7 * 2, 1)},
+            "repos": {"pris": max(presence - worked_d - absences - ferie_td, 0), "dus": round(repos_dus, 1)},
+            "periodes": periodes,
         }
 
     return {
