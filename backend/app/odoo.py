@@ -472,6 +472,18 @@ def _ccnt_leave_cat(name: str | None) -> str:
     return "conge"
 
 
+def _feries_split(ferie_dates: list[str], worked_dates: set[str]) -> dict:
+    """Fériés perçus vs à rattraper : un férié tombé un jour TRAVAILLÉ (timbrage > 0)
+    est dû en compensatoire (à rattraper) ; sinon il est perçu (jour de congé reçu)."""
+    a_rattraper = sum(1 for d in ferie_dates if d in worked_dates)
+    return {"percus": len(ferie_dates) - a_rattraper, "a_rattraper": a_rattraper}
+
+
+def _theo_sum(segments: list) -> float:
+    """Heures théoriques = somme, sur des segments (jours_nets, hebdo), de jours_nets/7 × hebdo."""
+    return sum(net / 7 * weekly for net, weekly in segments)
+
+
 def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
     """Données CCNT annuelles pour l'onglet Présence : heures timbrées par mois +
     calendrier des types de jour. Sources : hr.attendance (heures réelles timbrées),
@@ -566,6 +578,7 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
     # 5) décompte « au % » à jour au jour J (règle CCNT : Odoo = source de vérité).
     #    théorique = ((présence − absences) / 7) × hebdo ; vacances pris(calendaires)/droit(allocation).
     decompte = None
+    arcs = None
     if not hourly:
         today = datetime.now(TZ).date()
         y0, y1 = date(year, 1, 1), date(year, 12, 31)
@@ -582,6 +595,11 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
         worked_h = round(sum(h for iso, h in worked_by_day.items() if date.fromisoformat(iso) <= cutoff), 1)
         worked_d = sum(1 for iso, h in worked_by_day.items() if h > 0 and date.fromisoformat(iso) <= cutoff)
         absences = sum(absc.values())
+        # fériés perçus / à rattraper (à ce jour)
+        ferie_dates_td = [iso for iso in holiday_days if date.fromisoformat(iso) <= cutoff]
+        worked_dates_td = {iso for iso, h in worked_by_day.items()
+                           if h > 0 and date.fromisoformat(iso) <= cutoff}
+        feries = _feries_split(ferie_dates_td, worked_dates_td)
         # théorique & repos dus PAR PÉRIODE DE CONTRAT (hr.version) : chaque période × son %
         theo_du, repos_dus, presence, periodes = 0.0, 0.0, 0, []
         try:
@@ -590,6 +608,9 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
             cal_ids = list({v["resource_calendar_id"][0] for v in vers if v.get("resource_calendar_id")})
             cal_h = {c["id"]: (c.get("hours_per_week") or 0.0)
                      for c in (ro.execute_kw("resource.calendar", "read", [cal_ids], {"fields": ["hours_per_week"]}) if cal_ids else [])}
+            cur_month = cutoff.month
+            m0 = date(year, cur_month, 1)
+            seg_annee, seg_mois = [], []
             for v in vers:
                 if not v.get("resource_calendar_id"):
                     continue
@@ -601,21 +622,38 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
                 ps, pe = max(vs, y0), min(ve, cutoff)
                 if ps > pe:
                     continue
+                pw = cal_h.get(v["resource_calendar_id"][0], 0.0)
                 pdays = (pe - ps).days + 1
                 pabs = sum(1 for iso, cat in leave_by_day.items() if cat in absc and ps <= date.fromisoformat(iso) <= pe)
-                pw = cal_h.get(v["resource_calendar_id"][0], 0.0)
-                net_p = max(pdays - pabs, 0)
-                theo_du += net_p / 7 * pw
-                repos_dus += net_p / 7 * 2
+                seg_annee.append((max(pdays - pabs, 0), pw))
                 presence += pdays
                 periodes.append({"du": str(ps), "au": str(pe), "pct": round(pw / 42 * 100) if pw else 0})
+                # portion de cette période dans le mois en cours (pour l'arc mois)
+                ms, me = max(ps, m0), pe  # pe <= cutoff (donc <= fin du mois courant côté futur)
+                if me >= ms and ms.month == cur_month:
+                    mdays = (me - ms).days + 1
+                    mabs = sum(1 for iso, cat in leave_by_day.items() if cat in absc and ms <= date.fromisoformat(iso) <= me)
+                    seg_mois.append((max(mdays - mabs, 0), pw))
+            if seg_annee:
+                theo_du = _theo_sum(seg_annee)
+                repos_dus = _theo_sum([(n, 2) for n, _ in seg_annee])
         except Exception:
             periodes = []
+            seg_annee, seg_mois = [], []
         if not periodes:  # repli : pas d'historique de contrat → calcul simple (calendrier courant)
             pstart = max(hire_d, y0)
             presence = (cutoff - pstart).days + 1 if cutoff >= pstart else 0
             net = max(presence - absences, 0)
             theo_du, repos_dus = net / 7 * weekly, net / 7 * 2
+            cur_month = cutoff.month
+            m0 = date(year, cur_month, 1)
+            ms = max(pstart, m0)
+            if ms <= cutoff:
+                mdays = (cutoff - ms).days + 1
+                mabs = sum(1 for iso, cat in leave_by_day.items() if cat in absc and ms <= date.fromisoformat(iso) <= cutoff)
+                seg_mois = [(max(mdays - mabs, 0), weekly)]
+            else:
+                seg_mois = []
         vac_droit = 0.0
         try:
             al = ro.execute_kw(
@@ -631,14 +669,22 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
             "heures": {"fait": worked_h, "du": round(theo_du, 1)},
             "vacances": {"pris": absc["vac"], "droit": vac_droit},
             "repos": {"pris": max(presence - worked_d - absences - ferie_td, 0), "dus": round(repos_dus, 1)},
+            "feries": feries,
             "periodes": periodes,
+        }
+        cur_weekly = (seg_annee[-1][1] if seg_annee else weekly)  # hebdo de la dernière période
+        today_iso = cutoff.isoformat()
+        arcs = {
+            "jour": {"fait": round(worked_by_day.get(today_iso, 0.0), 1), "du": round(cur_weekly / 5, 1)},
+            "mois": {"fait": months[cutoff.month - 1]["hours"], "du": round(_theo_sum(seg_mois), 1)},
+            "annee": {"fait": decompte["heures"]["fait"], "du": decompte["heures"]["du"]},
         }
 
     return {
         "year": year, "hourly": hourly, "weekly": round(weekly, 1),
         "worked_total": round(sum(worked_by_day.values()), 1),
         "worked_days": sum(1 for h in worked_by_day.values() if h > 0),
-        "months": months, "calendar": calendar, "decompte": decompte,
+        "months": months, "calendar": calendar, "decompte": decompte, "arcs": arcs,
     }
 
 

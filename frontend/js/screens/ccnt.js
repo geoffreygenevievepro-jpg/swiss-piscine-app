@@ -6,6 +6,16 @@ const MN = ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juil", "Août", "Sep
 const MI = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
 const f1 = (v) => v == null ? "—" : Number(v).toLocaleString("fr-CH", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
+function gauge(a, label) {
+  const fait = a.fait || 0, du = a.du || 0;
+  const pct = du ? Math.min(100, Math.round(fait / du * 100)) : 0;
+  const off = Math.round(138 - pct / 100 * 138);
+  return `<div class="ccg"><svg viewBox="0 0 100 56" style="width:92px">
+    <path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke="var(--line)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M6 50 A44 44 0 0 1 94 50" fill="none" stroke="var(--aqua-dark)" stroke-width="9" stroke-linecap="round" stroke-dasharray="138" stroke-dashoffset="${off}"/></svg>
+    <div class="ccgv">${pct}%</div><div class="ccgl">${label}<br><b>${f1(fait)}/${f1(du)} h</b></div></div>`;
+}
+
 function injectStyle() {
   if (document.getElementById("ccnt-style")) return;
   const s = document.createElement("style");
@@ -46,7 +56,13 @@ function injectStyle() {
    .ccnt-dz.mil{background:#6b7b9c;color:#fff}.ccnt-dz.mil b{color:#fff}
    .ccnt-dz.conge{background:#9aa7ab;color:#fff}.ccnt-dz.conge b{color:#fff}
    .ccnt-leg{display:flex;flex-wrap:wrap;gap:7px 11px;margin-top:11px;font-size:.66rem;color:var(--muted)}
-   .ccnt-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:middle}`;
+   .ccnt-leg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:middle}
+   .ccnt-arcs{display:flex;gap:6px;background:var(--white);border:1px solid var(--line);border-radius:14px;padding:12px 4px;margin-bottom:10px}
+   .ccg{flex:1;text-align:center}.ccgv{font-size:1.1rem;font-weight:800;color:var(--navy);margin-top:-20px}
+   .ccgl{font-size:.6rem;color:var(--muted);margin-top:2px}.ccgl b{color:var(--ink);font-size:.64rem}
+   .ccnt-solde{display:flex;justify-content:space-between;align-items:center;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:12px;font-size:.85rem}
+   .ccnt-solde .pos{color:var(--ok);font-weight:800}.ccnt-solde .neg{color:var(--danger);font-weight:800}
+   .ccnt-dec td.n small{font-weight:600}`;
   document.head.appendChild(s);
 }
 
@@ -90,21 +106,26 @@ export async function renderCcnt(host) {
 
   const dec = data.decompte;
   let summary;
-  if (dec) {  // employé AU % : décompte « réalisé / dû » à ce jour
-    const avance = (dec.heures.fait || 0) - (dec.heures.du || 0);
+  if (dec) {  // employé AU % : arcs CCNT + solde + décompte restant
+    const a = data.arcs || { jour: {}, mois: {}, annee: dec.heures };
+    const solde = (dec.heures.fait || 0) - (dec.heures.du || 0);
+    const soldeTxt = solde > 0 ? `<span class="pos">+${f1(solde)} h à récupérer</span>`
+      : solde < 0 ? `<span class="neg">${f1(-solde)} h de retard</span>` : "à l'équilibre";
+    const vacRest = (dec.vacances.droit || 0) - (dec.vacances.pris || 0);
+    const reposRest = (dec.repos.dus || 0) - (dec.repos.pris || 0);
+    const fer = dec.feries || { percus: 0, a_rattraper: 0 };
     const pers = dec.periodes || [];
     const contrat = pers.length === 1 ? `Contrat ${pers[0].pct}%`
       : pers.length > 1 ? `Contrat ${pers.map((p) => p.pct + "%").join(" puis ")}` : "";
     summary = `
-      <div class="ccnt-hero">
-        <span class="eb">Heures travaillées ${data.year} — à ce jour</span>
-        <div class="big">${f1(dec.heures.fait)} <span>/ ${f1(dec.heures.du)} h dues</span></div>
-        <div class="sub">${avance >= 0 ? "+" + f1(avance) + " h d'avance" : f1(-avance) + " h de retard"}</div>
-      </div>
+      <div class="ccnt-arcs">${gauge(a.jour, "Jour")}${gauge(a.mois, "Mois")}${gauge(a.annee, "Année")}</div>
+      <div class="ccnt-solde"><span>Solde d'heures ${data.year}</span>${soldeTxt}</div>
       <table class="ccnt-dec">
+        <tr><td>Vacances<small>restantes cette année</small></td><td class="n">${f1(vacRest)} <small>j · ${f1(dec.vacances.pris)} sur ${f1(dec.vacances.droit)}</small></td></tr>
+        <tr><td>Jours de repos<small>à prendre</small></td><td class="n">${f1(reposRest)} <small>j · ${f1(dec.repos.pris)} sur ${f1(dec.repos.dus)}</small></td></tr>
+        <tr><td>Jours fériés<small>perçus / à rattraper</small></td><td class="n">${fer.percus} / ${fer.a_rattraper}</td></tr>
+        <tr><td>Maladie<small>indemnisée 80% dès le 4e jour</small></td><td class="n">${count("mal")} <small>j</small></td></tr>
         <tr><td>Jours travaillés</td><td class="n">${dec.jours_travailles}</td></tr>
-        <tr><td>Vacances prises</td><td class="n">${f1(dec.vacances.pris)} <small>sur ${f1(dec.vacances.droit)}</small></td></tr>
-        <tr><td>Jours de repos</td><td class="n">${f1(dec.repos.pris)} <small>sur ${f1(dec.repos.dus)}</small></td></tr>
       </table>
       ${contrat ? `<div class="ccnt-contrat">${contrat}</div>` : ""}`;
   } else {  // employé À L'HEURE : heures timbrées, pas de décompte théorique

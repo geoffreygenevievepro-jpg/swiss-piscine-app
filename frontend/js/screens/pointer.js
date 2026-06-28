@@ -194,6 +194,7 @@ function monthCalendar(cal) {
 
 function draw(root, status, summary, balances, today, days, overview, cal) {
   clearTimer();
+  const isHHC = ((profile.get() || {}).company || {}).id === 1;
   const isIn = status.state === "in";
   const openStart = isIn ? new Date(status.open_since).getTime() : null;
   const baseToday = status.today_seconds, t0 = Date.now();
@@ -214,7 +215,7 @@ function draw(root, status, summary, balances, today, days, overview, cal) {
     </div>
     <p id="punch-msg" style="text-align:center;color:var(--ok);margin:0 0 8px;min-height:1.1em;font-size:.9rem"></p>
 
-    ${overview ? `<div class="gauges" style="margin:6px 0 14px">${gaugeHtml("Aujourd'hui", overview.day)}${gaugeHtml("Ce mois", overview.month)}${gaugeHtml("Cette année", overview.year)}</div>` : ""}
+    ${!isHHC && overview ? `<div class="gauges" style="margin:6px 0 14px">${gaugeHtml("Aujourd'hui", overview.day)}${gaugeHtml("Ce mois", overview.month)}${gaugeHtml("Cette année", overview.year)}</div>` : ""}
 
     <div class="strip-month">${new Date(today.date + "T00:00:00").toLocaleDateString("fr-CH", { month: "long", year: "numeric" })}</div>
     ${dayStrip(days, today.date)}
