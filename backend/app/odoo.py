@@ -224,8 +224,45 @@ def _employee_weekly_hours(hr_employee_id: int) -> float:
     return 42.5
 
 
+def _excused_days(ro, hr_employee_id: int, start_local, end_local) -> set:
+    """Jours (ISO local) d'absence justifiée sur [start, end[ : congés (hr.leave non
+    refusés/annulés, tous types) + fériés de la société. Sur ces jours le 'dû' = 0,
+    donc une absence justifiée ne crée jamais de déficit d'heures."""
+    company_id = employee_company_id(hr_employee_id)
+    s_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    e_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    sd, ed = start_local.date(), (end_local - timedelta(days=1)).date()
+    out: set = set()
+    try:
+        for lv in ro.execute_kw("hr.leave", "search_read",
+                                [[["employee_id", "=", hr_employee_id], ["state", "not in", ["refuse", "cancel"]],
+                                  ["request_date_from", "<=", ed.isoformat()], ["request_date_to", ">=", sd.isoformat()]]],
+                                {"fields": ["request_date_from", "request_date_to"]}):
+            try:
+                d0 = datetime.fromisoformat(str(lv["request_date_from"])[:10]).date()
+                d1 = datetime.fromisoformat(str(lv["request_date_to"])[:10]).date()
+            except (ValueError, TypeError):
+                continue
+            cur, stop = max(d0, sd), min(d1, ed)
+            while cur <= stop:
+                out.add(cur.isoformat())
+                cur += timedelta(days=1)
+    except Exception:
+        pass
+    try:
+        for h in ro.execute_kw("resource.calendar.leaves", "search_read",
+                               [[["resource_id", "=", False], ["company_id", "=", company_id],
+                                 ["date_from", ">=", s_utc], ["date_from", "<", e_utc]]],
+                               {"fields": ["date_from"]}):
+            out.add(_parse_odoo_dt(h["date_from"]).astimezone(TZ).date().isoformat())
+    except Exception:
+        pass
+    return out
+
+
 def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 0) -> dict:
-    """Heures travaillées vs dues sur jour / semaine / mois, par bucket (jour)."""
+    """Heures travaillées vs dues sur jour / semaine / mois, par bucket (jour).
+    Les jours d'absence justifiée (congés/fériés) ont un dû = 0 (pas de déficit)."""
     now = datetime.now(TZ)
     weekly = _employee_weekly_hours(hr_employee_id)
     daily = weekly / 5
@@ -269,18 +306,20 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
         if day in worked_by:
             worked_by[day] += a.get("worked_hours") or 0.0
 
+    excused = _excused_days(ro, hr_employee_id, start_local, end_local)
     buckets = []
     for d in dates:
-        due = round(daily, 2) if d.weekday() < 5 else 0.0
+        due = 0.0 if (d.weekday() >= 5 or d.isoformat() in excused) else round(daily, 2)
         w = round(worked_by[d.isoformat()], 2)
         buckets.append({"date": d.isoformat(), "worked": w, "due": due, "solde": round(w - due, 2)})
     worked_total = round(sum(worked_by.values()), 2)
+    due_total = round(sum(b["due"] for b in buckets), 1)   # exclut les jours d'absence justifiée
     return {
         "period": period,
         "start": start_local.date().isoformat(),
         "buckets": buckets,
         "worked_total": worked_total,
-        "due_total": round(due_total, 1),
+        "due_total": due_total,
         "solde_total": round(worked_total - due_total, 2),
     }
 
@@ -301,9 +340,11 @@ def year_balance(hr_employee_id: int) -> dict:
         {"fields": ["worked_hours"]},
     )
     worked = round(sum(a.get("worked_hours") or 0.0 for a in atts), 1)
+    end_excl = datetime(now.year, now.month, now.day, tzinfo=TZ) + timedelta(days=1)
+    excused = _excused_days(ro, hr_employee_id, start_local, end_excl)
     weekdays, d, today = 0, start_local.date(), now.date()
     while d <= today:
-        if d.weekday() < 5:
+        if d.weekday() < 5 and d.isoformat() not in excused:
             weekdays += 1
         d += timedelta(days=1)
     due = round(weekdays * daily, 1)
@@ -619,15 +660,18 @@ def hours_overview(hr_employee_id: int) -> dict:
         if d == today:
             w_day += wh
 
+    end_excl = datetime(now.year, now.month, now.day, tzinfo=TZ) + timedelta(days=1)
+    excused = _excused_days(ro, hr_employee_id, year_start, end_excl)
+
     def weekdays(d0, d1):
         n, d = 0, d0
         while d <= d1:
-            if d.weekday() < 5:
+            if d.weekday() < 5 and d.isoformat() not in excused:
                 n += 1
             d += timedelta(days=1)
         return n
 
-    due_day = daily if today.weekday() < 5 else 0.0
+    due_day = 0.0 if (today.weekday() >= 5 or today.isoformat() in excused) else daily
     due_month = weekdays(today.replace(day=1), today) * daily
     due_year = weekdays(today.replace(month=1, day=1), today) * daily
 
