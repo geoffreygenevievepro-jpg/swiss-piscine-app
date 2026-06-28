@@ -762,18 +762,27 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
     « à facturer ». Le client libre n'est créé que pour facturer."""
     company_id = employee_company_id(hr_employee_id)
     workers = [int(w) for w in (worker_ids or [])] or [hr_employee_id]
+    # planning.slot.employee_ids est CALCULÉ → l'équipe s'assigne via resource_ids.
+    # Une seule lecture (nom + ressource), réutilisée pour la note/worksheet.
+    worker_rows = []
+    try:
+        worker_rows = get_client().execute_kw(
+            "hr.employee", "read", [workers], {"fields": ["name", "resource_id"]})
+    except Exception:
+        worker_rows = []
+    worker_names = [r["name"] for r in worker_rows]
+    res_ids = [r["resource_id"][0] for r in worker_rows if r.get("resource_id")]
     title_bits = [b for b in [type_label, client_name] if b]
     label = " — ".join(title_bits) or name or "Intervention"
     vals = {
-        "employee_ids": [(6, 0, workers)],
         "start_datetime": start_utc,
         "end_datetime": end_utc,
         "company_id": company_id,
         "role_id": ROLE_TECHNICIEN_ID,
         "name": label,
     }
-    # NB : l'équipe est portée par employee_ids ci-dessus. planning.slot n'a PAS de
-    # champ resource_id (Odoo saas-19.2) → ne rien écrire dessus (resource_ids reçu mais non utilisé).
+    if res_ids:
+        vals["resource_ids"] = [(6, 0, res_ids)]
     if partner_id:
         vals["partner_id"] = partner_id
     rw = get_write_client()
@@ -805,12 +814,7 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
         }]))
 
     tag_names = [t["name"] for t in REPORT_TAGS if t["id"] in (tag_ids or [])]
-    worker_names = []
-    try:
-        rows = get_client().execute_kw("hr.employee", "read", [workers], {"fields": ["name"]})
-        worker_names = [r["name"] for r in rows]
-    except Exception:
-        worker_names = []
+    # worker_names déjà résolu en amont (lecture nom + resource_id).
     body = _build_intervention_html(
         description=name, client_name=client_name, status=status,
         products=products or [], discount=discount, vat_rate=vat_rate,
@@ -1221,18 +1225,22 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     tag_ids = [int(t) for t in (report.get("tag_ids") or [])]
     report["tag_names"] = [t["name"] for t in REPORT_TAGS if t["id"] in tag_ids]
 
-    # Employés ayant travaillé : mise à jour du créneau + noms pour la note.
+    # Équipe ayant travaillé : assignée au créneau via resource_ids (employee_ids est
+    # calculé → non inscriptible). Une lecture nom + ressource.
     worker_ids = [int(w) for w in (report.get("worker_ids") or [])]
     if worker_ids:
+        wrows = []
         try:
-            rw.execute_kw("planning.slot", "write", [[slot_id], {"employee_ids": [(6, 0, worker_ids)]}])
+            wrows = ro.execute_kw("hr.employee", "read", [worker_ids], {"fields": ["name", "resource_id"]})
         except Exception:
-            pass
-        try:
-            report["worker_names"] = [r["name"] for r in
-                                      ro.execute_kw("hr.employee", "read", [worker_ids], {"fields": ["name"]})]
-        except Exception:
-            report["worker_names"] = []
+            wrows = []
+        report["worker_names"] = [r["name"] for r in wrows]
+        res_ids = [r["resource_id"][0] for r in wrows if r.get("resource_id")]
+        if res_ids:
+            try:
+                rw.execute_kw("planning.slot", "write", [[slot_id], {"resource_ids": [(6, 0, res_ids)]}])
+            except Exception:
+                pass
     elif slot.get("employee_ids"):
         # Aucun employé re-précisé → on reprend l'équipe déjà assignée au créneau,
         # pour que la fiche montre toujours qui a travaillé (cohérence avec « Je fais »).

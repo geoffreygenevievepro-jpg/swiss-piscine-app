@@ -78,6 +78,26 @@ def test_submit_report_no_invoice_without_products(monkeypatch):
     assert res["invoice"] is False and res["invoice_id"] is None
 
 
+def test_submit_report_assigns_resources(monkeypatch):
+    ro = MagicMock()
+    ro.execute_kw.side_effect = [
+        _slot_rows(),                                                   # 1) slot search_read
+        [{"name": "Claudio", "resource_id": [424, "C"]},               # 2) hr.employee read
+         {"name": "Loïc", "resource_id": [426, "L"]}],
+    ]
+    rw = MagicMock()
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 5)
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    monkeypatch.setattr(odoo, "get_write_client", lambda: rw)
+    monkeypatch.setattr(odoo, "_fill_worksheet", lambda *a, **k: None)
+    odoo.submit_report(1, "Alex", 5, {"type": "E", "worker_ids": [178, 180], "products": []})
+    res_writes = [c for c in rw.execute_kw.call_args_list
+                  if c.args[0] == "planning.slot" and c.args[1] == "write"
+                  and "resource_ids" in c.args[2][1]]
+    assert res_writes, "submit_report doit assigner l'équipe via resource_ids"
+    assert res_writes[0].args[2][1]["resource_ids"] == [(6, 0, [424, 426])]
+
+
 # --- T3 : worksheet Remarques + create_intervention resource/parts/billing -
 def test_fill_worksheet_maps_remarques(monkeypatch):
     rw = MagicMock(); ro = MagicMock()
@@ -95,7 +115,7 @@ def test_fill_worksheet_maps_remarques(monkeypatch):
 
 def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
     rw = MagicMock(); rw.execute_kw.return_value = 100
-    ro = MagicMock(); ro.execute_kw.return_value = [{"name": "Alex"}]
+    ro = MagicMock(); ro.execute_kw.return_value = [{"name": "Alex", "resource_id": [99, "Alex"]}]
     monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 5)
     monkeypatch.setattr(odoo, "get_write_client", lambda: rw)
     monkeypatch.setattr(odoo, "get_client", lambda: ro)
@@ -110,10 +130,11 @@ def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
         products=[{"name": "Filtre", "qty": 1, "price": 80.0, "billable": True}],
         parts=["Filtre", "Vis"], resource_ids=[7], remarques="RAS")
     create_vals = rw.execute_kw.call_args_list[0].args[2][0]
-    # planning.slot n'a PAS de champ resource_id (Odoo saas-19.2) → ne JAMAIS l'écrire.
+    # planning.slot.employee_ids est CALCULÉ → on n'écrit ni resource_id ni employee_ids.
     assert "resource_id" not in create_vals
-    # L'équipe est assignée via employee_ids (ici hr_employee_id=1 par défaut).
-    assert create_vals["employee_ids"] == [(6, 0, [1])]
+    assert "employee_ids" not in create_vals
+    # L'équipe est assignée via resource_ids (résolu depuis worker_ids/hr_employee_id).
+    assert create_vals["resource_ids"] == [(6, 0, [99])]
     assert res["invoice"] is True and res["invoice_id"] == 777
     assert inv["cid"] == 5 and inv["p"] == 42
     assert cap["report_like"]["parts"] == ["Filtre", "Vis"]
