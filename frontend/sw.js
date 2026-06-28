@@ -1,6 +1,6 @@
 // Service worker — coquille hors-ligne (app shell). La file de synchro des
 // actions terrain (pointage, rapports) sera ajoutée au Sprint 2.
-const CACHE = "sp-app-shell-v70";
+const CACHE = "sp-app-shell-v71";
 const ASSETS = [
   "./",
   "./index.html",
@@ -33,6 +33,9 @@ const ASSETS = [
   "./js/screens/semaine.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png",
+  "./img/hero/hero1.webp",
+  "./img/hero/hero2.webp",
+  "./img/hero/hero3.webp",
 ];
 
 self.addEventListener("install", (e) => {
