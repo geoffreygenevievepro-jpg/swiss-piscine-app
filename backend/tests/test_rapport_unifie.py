@@ -191,3 +191,19 @@ def test_submit_report_links_project_task(monkeypatch):
     link = [c for c in rw.execute_kw.call_args_list
             if c.args[0] == "planning.slot" and c.args[1] == "write" and "project_id" in c.args[2][1]]
     assert link and link[0].args[2][1] == {"project_id": 107, "task_id": 4899}
+
+
+# --- #2 : périmètre liste interventions du jour ----------------------------
+def test_today_interventions_scope(monkeypatch):
+    ro = MagicMock(); ro.execute_kw.return_value = []
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 5)
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    # technicien : filtré sur l'employé
+    odoo.today_interventions(3, "2026-06-28", all_company=False)
+    dom = ro.execute_kw.call_args.args[2][0]
+    assert ["employee_ids", "in", [3]] in dom
+    # admin/manager : pas de filtre employé (toute la société)
+    ro.execute_kw.reset_mock()
+    odoo.today_interventions(3, "2026-06-28", all_company=True)
+    dom = ro.execute_kw.call_args.args[2][0]
+    assert not any("employee_ids" in str(c) for c in dom)

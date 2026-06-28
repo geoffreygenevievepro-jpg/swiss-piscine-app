@@ -77,7 +77,8 @@ class Report(BaseModel):
 
 @router.get("/interventions/today")
 def today(date: str | None = None, emp=Depends(get_current_employee)):
-    return odoo.today_interventions(emp["hr_employee_id"], date)
+    all_company = emp["role"] in ("admin", "manager")   # admin/manager : tout ; technicien : les siennes
+    return odoo.today_interventions(emp["hr_employee_id"], date, all_company=all_company)
 
 
 @router.get("/interventions/{slot_id}")
