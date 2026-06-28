@@ -169,18 +169,29 @@ input.pin { letter-spacing: .4em; text-align: center; font-size: 1.4rem; }
 .login-card p.sub { margin: 0 0 20px; color: var(--muted); font-size: .9rem; }
 body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-dark)); }
 
-/* --- Météo colorée --- */
-.weather-card { background: linear-gradient(135deg, #1aa7b8 0%, #0c5e68 100%); border: 0; color: #fff; box-shadow: 0 12px 30px rgba(12,94,104,.28); }
+/* --- Météo colorée (fond dynamique selon le temps, posé en JS) --- */
+.weather-card { position: relative; overflow: hidden; background: linear-gradient(150deg, #3fb1e8 0%, #1463a6 100%); border: 0; color: #fff; box-shadow: 0 14px 32px rgba(12,80,110,.30); transition: background .7s ease; }
+.weather-card::after { content: ""; position: absolute; top: -55px; right: -35px; width: 180px; height: 180px; border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,.26), transparent 68%); pointer-events: none; }
+.weather-card > * { position: relative; z-index: 1; }
 .weather-card h3, .weather-card .muted, .weather-card .card-head .t .icon, .weather-card .card-head .icon { color: #fff !important; }
-.weather-card .muted { opacity: .9; }
-.wx-now { display: flex; align-items: center; gap: 16px; margin: 10px 0 16px; }
-.wx-now > .icon { width: 54px; height: 54px; }
-.wx-now .temp { font-family: var(--font-display); font-size: 2.4rem; font-weight: 700; line-height: 1; }
+.wx-loc { display: inline-flex; align-items: center; gap: 4px; font-size: .82rem; opacity: .92; }
+.wx-loc .icon { color: #fff; }
+.wx-now { display: flex; align-items: center; gap: 14px; margin: 12px 0 16px; }
+.wx-orb { flex: 0 0 auto; width: 66px; height: 66px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: rgba(255,255,255,.18); box-shadow: inset 0 0 0 1px rgba(255,255,255,.20), 0 4px 14px rgba(0,0,0,.10); }
+.wx-orb .icon { width: 40px; height: 40px; color: #fff; }
+.wx-main { flex: 1; min-width: 0; }
+.wx-main .temp { font-family: var(--font-display); font-size: 2.7rem; font-weight: 700; line-height: 1; }
+.wx-cond { font-size: .98rem; font-weight: 600; margin-top: 2px; }
+.wx-meta { display: flex; align-items: center; gap: 5px; font-size: .8rem; opacity: .9; margin-top: 4px; }
+.wx-meta .icon { width: 14px; height: 14px; color: #fff; }
+.wx-mxmn { flex: 0 0 auto; display: flex; flex-direction: column; gap: 7px; text-align: right; }
+.wx-hi, .wx-lo { display: inline-block; background: rgba(255,255,255,.18); border-radius: 9px; padding: 3px 10px; font-size: .84rem; font-weight: 600; }
+.wx-lo { opacity: .85; }
 .wx-fore { display: flex; gap: 8px; }
-.wx-fore .h { flex: 1; text-align: center; background: rgba(255,255,255,.15); border-radius: 12px; padding: 10px 4px; }
-.wx-fore .h .icon { color: #fff; margin: 4px auto; display: block; }
+.wx-fore .h { flex: 1; text-align: center; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.10); border-radius: 14px; padding: 10px 4px; }
+.wx-fore .h .icon { width: 22px; height: 22px; color: #fff; margin: 5px auto; display: block; }
 .wx-fore .h small { display: block; font-size: .7rem; opacity: .85; }
-.wx-fore .h b { font-size: .86rem; font-weight: 600; }
+.wx-fore .h b { font-size: .9rem; font-weight: 700; }
 
 /* --- Bannière « Message à l'équipe » --- */
 .msg-banner { display: flex; align-items: flex-start; gap: 13px; background: linear-gradient(135deg, #0c2b38, #0e5e68 70%, #127d89); color: #fff; border-radius: 16px; padding: 16px 18px; margin-bottom: 16px; box-shadow: 0 12px 28px rgba(12, 80, 92, .28); }

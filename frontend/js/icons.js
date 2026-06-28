@@ -12,6 +12,7 @@ export const ICON_SPRITE = `<svg width="0" height="0" style="position:absolute" 
 <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-13 0 9-5 14-13 13M5 19c2-5 5-7 9-8"/></symbol>
 <symbol id="i-gift" viewBox="0 0 24 24"><rect x="4" y="9.5" width="16" height="11" rx="1.5"/><path d="M3 9.5h18v3.5H3zM12 9.5v11"/><path d="M12 9.5C10.5 6.5 6.5 6.5 6.5 8.5S9 9.5 12 9.5zM12 9.5C13.5 6.5 17.5 6.5 17.5 8.5S15 9.5 12 9.5z"/></symbol>
 <symbol id="i-wave" viewBox="0 0 24 24"><path d="M3 13c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 18c2-2 4-2 6 0s4 2 6 0 4-2 6 0M3 8c2-2 4-2 6 0s4 2 6 0 4-2 6 0"/></symbol>
+<symbol id="i-wind" viewBox="0 0 24 24"><path d="M3 8h10a2.5 2.5 0 1 0-2.5-2.5M3 16h13a2.5 2.5 0 1 1-2.5 2.5M3 12h16a2.5 2.5 0 1 0-2.5-2.5"/></symbol>
 <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12H5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></symbol>
 <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M7 18a4.2 4.2 0 0 1-.4-8.4A5.2 5.2 0 0 1 17 9.6 3.7 3.7 0 0 1 17 18z"/></symbol>
 <symbol id="i-cloud-sun" viewBox="0 0 24 24"><circle cx="8" cy="7.5" r="2.6"/><path d="M8 2.5V4M3.6 3.6l1 1M2.5 8H4M3.6 12.4l1-1"/><path d="M10 19a3.4 3.4 0 0 1-.3-6.8 4.6 4.6 0 0 1 9 .8 3 3 0 0 1 .3 6z"/></symbol>

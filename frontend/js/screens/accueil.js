@@ -105,27 +105,54 @@ function birthdayBanner(list) {
 }
 
 // --- Météo colorée -----------------------------------------------------------
+// Dégradé d'ambiance selon le temps + jour/nuit (rend la carte vivante).
+function weatherTheme(code, isDay) {
+  if (!isDay) {
+    if (code >= 95) return "linear-gradient(150deg,#2a2f45 0%,#12131f 100%)";       // orage nuit
+    if (code >= 51) return "linear-gradient(150deg,#243a4e 0%,#101d29 100%)";       // pluie/neige nuit
+    return "linear-gradient(150deg,#1e2c4d 0%,#0b1224 100%)";                       // nuit claire
+  }
+  if (code === 0) return "linear-gradient(150deg,#3fb1e8 0%,#1f7fc4 55%,#1463a6 100%)";   // grand soleil
+  if (code <= 2) return "linear-gradient(150deg,#5ab4e0 0%,#2c84bd 100%)";          // peu nuageux
+  if (code === 3) return "linear-gradient(150deg,#7d93a6 0%,#4a5d70 100%)";         // couvert
+  if (code <= 48) return "linear-gradient(150deg,#93a3af 0%,#62727e 100%)";         // brouillard
+  if (code >= 95) return "linear-gradient(150deg,#414867 0%,#1d2233 100%)";         // orage jour
+  if (code <= 67) return "linear-gradient(150deg,#4a7891 0%,#274757 100%)";         // pluie
+  return "linear-gradient(150deg,#8fb4cf 0%,#4f7894 100%)";                         // neige/averses
+}
+
 function meteoCard() {
-  return `<div class="card weather-card">
-    <div class="card-head"><div class="t">${icon("cloud")}<h3>Météo</h3></div><span class="muted" style="font-size:.8rem">Fribourg</span></div>
+  return `<div class="card weather-card" id="meteo-card">
+    <div class="card-head"><div class="t">${icon("cloud")}<h3>Météo</h3></div><span class="wx-loc">${icon("pin", "icon-sm")} Fribourg</span></div>
     <div class="wx-now" id="meteo-body"><span class="muted">Chargement…</span></div>
     <div class="wx-fore" id="meteo-fore"></div>
   </div>`;
 }
 
 async function loadMeteo(dash) {
+  const card = dash.querySelector("#meteo-card");
   const body = dash.querySelector("#meteo-body");
   const fore = dash.querySelector("#meteo-fore");
   if (!body) return;
   try {
-    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=46.80&longitude=7.16&current=temperature_2m,weather_code&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Europe%2FZurich&forecast_days=1");
+    const r = await fetch("https://api.open-meteo.com/v1/forecast?latitude=46.80&longitude=7.16&current=temperature_2m,weather_code,apparent_temperature,wind_speed_10m,is_day&hourly=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&timezone=Europe%2FZurich&forecast_days=1");
     const d = await r.json();
     const code = d.current.weather_code;
+    const isDay = d.current.is_day === 1;
     const t = Math.round(d.current.temperature_2m);
+    const feels = Math.round(d.current.apparent_temperature);
+    const wind = Math.round(d.current.wind_speed_10m);
     const mx = Math.round(d.daily.temperature_2m_max[0]);
     const mn = Math.round(d.daily.temperature_2m_min[0]);
-    body.innerHTML = `${icon(weatherIcon(code))}
-      <div><div class="temp tabular">${t}°</div><div class="muted" style="font-size:.86rem">${weatherLabel(code)} · max ${mx}° / min ${mn}°</div></div>`;
+    if (card) card.style.background = weatherTheme(code, isDay);
+    body.innerHTML = `
+      <div class="wx-orb">${icon(weatherIcon(code))}</div>
+      <div class="wx-main">
+        <div class="temp tabular">${t}°</div>
+        <div class="wx-cond">${weatherLabel(code)}</div>
+        <div class="wx-meta">Ressenti ${feels}° · ${icon("wind", "icon-sm")} ${wind} km/h</div>
+      </div>
+      <div class="wx-mxmn"><span class="wx-hi">↑ ${mx}°</span><span class="wx-lo">↓ ${mn}°</span></div>`;
     if (fore) {
       const times = d.hourly.time, temps = d.hourly.temperature_2m, codes = d.hourly.weather_code;
       const nowH = new Date().getHours();
