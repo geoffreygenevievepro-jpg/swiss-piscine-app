@@ -80,8 +80,8 @@ def get_employee(hr_employee_id: int) -> dict | None:
     domain = [["id", "=", hr_employee_id]] + _company_domain(company_id)
     rows = client.execute_kw(
         "hr.employee", "search_read", [domain],
-        {"fields": ["name", "job_title", "work_email", "work_phone",
-                    "mobile_phone", "department_id", "user_id"], "limit": 1},
+        {"fields": ["name", "l10n_ch_legal_first_name", "job_title", "work_email",
+                    "work_phone", "mobile_phone", "department_id", "user_id"], "limit": 1},
     )
     return rows[0] if rows else None
 

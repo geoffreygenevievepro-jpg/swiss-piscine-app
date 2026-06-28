@@ -45,6 +45,7 @@ def me(emp=Depends(get_current_employee)):
         "id": emp["id"],
         "login": emp["login"],
         "name": emp["name"],
+        "first_name": (odoo_profile or {}).get("l10n_ch_legal_first_name") or None,
         "role": emp["role"],
         "hr_employee_id": emp["hr_employee_id"],
         "effective_tabs": effective_tabs,

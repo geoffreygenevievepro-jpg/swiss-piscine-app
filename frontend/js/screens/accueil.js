@@ -44,7 +44,9 @@ export const accueil = {
   async render(root, ctx) {
     const nav = (ctx && ctx.navigate) || (() => {});
     const me = profile.get();
-    const prenom = me && me.name ? me.name.split(" ").slice(-1)[0] : "";
+    // Prénom = champ structuré Odoo (fiable) ; repli sur le dernier mot du nom si absent.
+    const prenom = me && me.first_name ? me.first_name.split(" ")[0]
+      : (me && me.name ? me.name.split(" ").slice(-1)[0] : "");
     storeKey = (me && me.name) ? me.name.replace(/\s+/g, "_") : "anon";
     root.innerHTML = `
       <h2 style="margin:4px 0 18px">Salut${prenom ? " " + escapeHtml(prenom) : ""}</h2>
