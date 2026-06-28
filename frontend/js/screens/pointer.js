@@ -154,8 +154,8 @@ function monthCalendar(cal) {
   const label = new Date(cal.year, cal.month - 1, 1).toLocaleDateString("fr-CH", { month: "long", year: "numeric" });
   const firstWd = (new Date(cal.year, cal.month - 1, 1).getDay() + 6) % 7;  // Lun=0
   const tISO = todayISO();
-  const bgOf = (t) => ({ vacances: "var(--ok-soft)", conge: "var(--violet-soft)", ferie: "var(--aqua-soft)", weekend: "var(--line-soft)" }[t] || "#fff");
-  const fgOf = (t) => ({ vacances: "var(--ok)", conge: "var(--violet)", ferie: "var(--aqua-dark)", weekend: "var(--muted)" }[t] || "var(--ink)");
+  // Teintes nettes et bien distinctes ; texte du jour toujours en sombre = lisible.
+  const bgOf = (t) => ({ vacances: "#bfe6cd", conge: "#dcc9f4", ferie: "#bcd8f7", weekend: "#e7ebee" }[t] || "#fff");
   const wdHead = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
     .map(w => `<div style="text-align:center;font-size:.64rem;color:var(--muted);text-transform:uppercase">${w}</div>`).join("");
   const blanks = Array(firstWd).fill("<div></div>").join("");
@@ -163,13 +163,13 @@ function monthCalendar(cal) {
     const dn = Number(d.date.slice(8, 10));
     const isToday = d.date === tISO;
     const h = d.worked > 0 ? fmtH(d.worked) : "";
-    return `<div style="background:${bgOf(d.type)};color:${fgOf(d.type)};border-radius:8px;min-height:44px;padding:3px 1px;text-align:center;${isToday ? "outline:2px solid var(--aqua-dark);outline-offset:-2px" : "border:1px solid var(--line-soft)"}">
-      <div style="font-size:.74rem;font-weight:700">${dn}</div>
-      <div style="font-size:.64rem" class="tabular">${h}</div>
+    return `<div style="background:${bgOf(d.type)};color:var(--navy);border-radius:8px;min-height:44px;padding:3px 1px;text-align:center;${isToday ? "outline:2px solid var(--navy);outline-offset:-2px" : "border:1px solid var(--line)"}">
+      <div style="font-size:.78rem;font-weight:700">${dn}</div>
+      <div style="font-size:.66rem;color:var(--ink)" class="tabular">${h}</div>
     </div>`;
   }).join("");
   const legend = [["Vacances", "vacances"], ["Congé / maladie", "conge"], ["Férié", "ferie"], ["Week-end", "weekend"]]
-    .map(([l, t]) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:.72rem;color:var(--muted)"><span style="width:12px;height:12px;border-radius:3px;background:${bgOf(t)};border:1px solid var(--line)"></span>${l}</span>`).join("");
+    .map(([l, t]) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:.72rem;color:var(--ink)"><span style="width:13px;height:13px;border-radius:3px;background:${bgOf(t)};border:1px solid var(--line)"></span>${l}</span>`).join("");
   return `<div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <button class="btn secondary nav" id="cal-prev">‹</button>
