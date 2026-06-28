@@ -158,18 +158,24 @@ function quickActions(status) {
 
 // --- Résumé heures : jauges circulaires --------------------------------------
 function gauge(label, x) {
-  const over = (x.overtime || 0) > 0;
+  const solde = (x.worked || 0) - (x.due || 0);   // heures sup (+) ou déficit (−)
+  const over = solde > 0.001, under = solde < -0.001;
   const L = 132; // longueur de l'arc semicercle (π·42)
   const off = (L * (1 - Math.min(100, x.pct) / 100)).toFixed(1);
-  const col = over ? "#2f8f63" : "#127d89";
+  const col = under ? "var(--danger)" : (over ? "#2f8f63" : "#127d89");
+  const soldeLine = over
+    ? `<div style="font-size:.74rem;font-weight:700;color:#2f8f63;margin-top:2px">+${fmtH(solde)} sup</div>`
+    : (under ? `<div style="font-size:.74rem;font-weight:700;color:var(--danger);margin-top:2px">${fmtH(solde)}</div>`
+             : `<div style="font-size:.72rem;color:var(--muted);margin-top:2px">à jour</div>`);
   return `<div class="halfg">
     <div class="halfg-label">${label}</div>
     <svg viewBox="0 0 100 58" class="halfg-svg">
       <path d="M8 50 A42 42 0 0 1 92 50" fill="none" stroke="var(--aqua-soft)" stroke-width="9" stroke-linecap="round"/>
       <path d="M8 50 A42 42 0 0 1 92 50" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${L}" stroke-dashoffset="${off}"/>
-      <text x="50" y="47" text-anchor="middle" class="halfg-pct" fill="${over ? col : "#0c2b38"}">${x.pct}%</text>
+      <text x="50" y="47" text-anchor="middle" class="halfg-pct" fill="${under ? "var(--danger)" : (over ? col : "#0c2b38")}">${x.pct}%</text>
     </svg>
-    <div class="halfg-sub tabular">${fmtH(x.worked)} / ${fmtH(x.due)}${over ? ` · <span class="g-sup">+${fmtH(x.overtime)}</span>` : ""}</div>
+    <div class="halfg-sub tabular">${fmtH(x.worked)} / ${fmtH(x.due)}</div>
+    ${soldeLine}
   </div>`;
 }
 
