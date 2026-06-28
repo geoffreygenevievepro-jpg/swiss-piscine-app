@@ -225,13 +225,10 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
 .qa-timbrage .qbadge { background: rgba(255,255,255,.22); color: #fff; }
 .qa-in { background: var(--ok); }
 .qa-out { background: var(--danger); }
-/* Vacances restantes — panneau visuel (dégradé soleil). */
-.vac-block { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 14px 16px; border-radius: 14px; background: linear-gradient(135deg, #fbbf6b, #e0735a); color: #fff; }
-.vac-ic { width: 46px; height: 46px; border-radius: 13px; background: rgba(255,255,255,.22); color: #fff; display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
-.vac-meta { display: flex; flex-direction: column; min-width: 0; }
-.vac-num { font-size: 1.95rem; font-weight: 800; line-height: 1; }
-.vac-unit { font-size: 1rem; font-weight: 600; opacity: .92; }
-.vac-lbl { font-size: .85rem; opacity: .95; margin-top: 3px; }
+/* Vacances restantes — ligne discrète sous les jauges. */
+.vac-line { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line-soft); font-size: .9rem; color: var(--muted); }
+.vac-line .icon { color: var(--warn); }
+.vac-line strong { color: var(--ink); font-weight: 700; }
 /* Bandeau anniversaire (dégradé festif). */
 .bday-card { display: flex; align-items: center; gap: 14px; border: 0; background: linear-gradient(135deg, #7C4DFF, #FF5FA2); color: #fff; }
 .bday-ic { width: 46px; height: 46px; border-radius: 13px; background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; flex: 0 0 auto; }
