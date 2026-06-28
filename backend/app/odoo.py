@@ -224,6 +224,34 @@ def _employee_weekly_hours(hr_employee_id: int) -> float:
     return 42.5
 
 
+def _employee_daily_hours(hr_employee_id: int) -> dict:
+    """{jour_semaine (0=lundi … 6=dimanche): heures dues} d'après la VRAIE répartition
+    du calendrier Odoo (resource.calendar.attendance). Gère les temps partiels à horaire
+    irrégulier (ex. ne travaille que mar/jeu/ven) et les semaines de 6 jours.
+    Repli : hebdo ÷ 5 réparti lundi→vendredi si pas de lignes exploitables
+    (ou calendrier bi-hebdomadaire, non géré finement)."""
+    ro = get_client()
+    rows = ro.execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["resource_calendar_id"]})
+    cal_id = rows[0]["resource_calendar_id"][0] if rows and rows[0].get("resource_calendar_id") else None
+    if cal_id:
+        cal = ro.execute_kw("resource.calendar", "read", [[cal_id]],
+                            {"fields": ["attendance_ids", "two_weeks_calendar"]})
+        if cal and cal[0].get("attendance_ids") and not cal[0].get("two_weeks_calendar"):
+            lines = ro.execute_kw("resource.calendar.attendance", "read", [cal[0]["attendance_ids"]],
+                                  {"fields": ["dayofweek", "hour_from", "hour_to"]})
+            per: dict = {}
+            for ln in lines:
+                try:
+                    d = int(ln["dayofweek"])
+                except (ValueError, TypeError):
+                    continue
+                per[d] = per.get(d, 0.0) + (float(ln["hour_to"]) - float(ln["hour_from"]))
+            if per:
+                return per
+    weekly = _employee_weekly_hours(hr_employee_id)
+    return {d: weekly / 5 for d in range(5)}
+
+
 _EXCUSE_TYPE = {"vac": "vacances", "mal": "maladie", "acc": "accident"}
 
 
@@ -270,15 +298,13 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
     """Heures travaillées vs dues sur jour / semaine / mois, par bucket (jour).
     Les jours d'absence justifiée (congés/fériés) ont un dû = 0 (pas de déficit)."""
     now = datetime.now(TZ)
-    weekly = _employee_weekly_hours(hr_employee_id)
-    daily = weekly / 5
+    perday = _employee_daily_hours(hr_employee_id)
 
     if period == "day":
         day = (now + timedelta(days=offset)).date()
         start_local = datetime(day.year, day.month, day.day, tzinfo=TZ)
         end_local = start_local + timedelta(days=1)
         dates = [day]
-        due_total = daily if day.weekday() < 5 else 0.0
     elif period == "month":
         y, m = now.year, now.month + offset
         while m > 12:
@@ -291,12 +317,10 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
         dates, d = [], start_local.date()
         while d < end_local.date():
             dates.append(d); d += timedelta(days=1)
-        due_total = sum(daily for dd in dates if dd.weekday() < 5)
     else:  # week
         monday = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(weeks=offset)
         start_local, end_local = monday, monday + timedelta(days=7)
         dates = [(monday + timedelta(days=i)).date() for i in range(7)]
-        due_total = weekly
 
     start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
     end_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
@@ -316,9 +340,10 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
     buckets = []
     for d in dates:
         iso = d.isoformat()
-        due = 0.0 if (d.weekday() >= 5 or iso in excused) else round(daily, 2)
+        sched = perday.get(d.weekday(), 0.0)   # heures prévues ce jour selon le calendrier
+        due = 0.0 if iso in excused else round(sched, 2)
         w = round(worked_by[iso], 2)
-        typ = excused.get(iso) or ("weekend" if d.weekday() >= 5 else "work")
+        typ = excused.get(iso) or ("work" if sched > 0 else "weekend")
         buckets.append({"date": iso, "worked": w, "due": due, "solde": round(w - due, 2), "type": typ})
     worked_total = round(sum(worked_by.values()), 2)
     due_total = round(sum(b["due"] for b in buckets), 1)   # exclut les jours d'absence justifiée
@@ -334,10 +359,9 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
 
 def year_balance(hr_employee_id: int) -> dict:
     """Cumul de l'année en cours : heures réalisées vs dues (à ce jour) + solde.
-    Dû approximé (hours_per_week / 5 par jour ouvré écoulé, jours fériés ignorés)."""
+    Dû = somme des heures prévues au calendrier sur les jours écoulés (congés/fériés exclus)."""
     now = datetime.now(TZ)
-    weekly = _employee_weekly_hours(hr_employee_id)
-    daily = weekly / 5
+    perday = _employee_daily_hours(hr_employee_id)
     start_local = datetime(now.year, 1, 1, tzinfo=TZ)
     start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
     now_utc = now.astimezone(timezone.utc).strftime(ODOO_FMT)
@@ -350,12 +374,12 @@ def year_balance(hr_employee_id: int) -> dict:
     worked = round(sum(a.get("worked_hours") or 0.0 for a in atts), 1)
     end_excl = datetime(now.year, now.month, now.day, tzinfo=TZ) + timedelta(days=1)
     excused = _excused_days(ro, hr_employee_id, start_local, end_excl)
-    weekdays, d, today = 0, start_local.date(), now.date()
+    due_sum, d, today = 0.0, start_local.date(), now.date()
     while d <= today:
-        if d.weekday() < 5 and d.isoformat() not in excused:
-            weekdays += 1
+        if d.isoformat() not in excused:
+            due_sum += perday.get(d.weekday(), 0.0)
         d += timedelta(days=1)
-    due = round(weekdays * daily, 1)
+    due = round(due_sum, 1)
     return {"year": now.year, "worked": worked, "due": due, "solde": round(worked - due, 1)}
 
 
@@ -394,6 +418,7 @@ def month_calendar(hr_employee_id: int, company_id: int, year: int, month: int) 
     (work / weekend / vacances / conge / ferie). Sources : hr.attendance, hr.leave,
     resource.calendar.leaves (fériés société)."""
     ro = get_client()
+    perday = _employee_daily_hours(hr_employee_id)   # heures prévues par jour de semaine
     start_local = datetime(year, month, 1, tzinfo=TZ)
     nmonth, nyear = (1, year + 1) if month == 12 else (month + 1, year)
     end_local = datetime(nyear, nmonth, 1, tzinfo=TZ)
@@ -447,8 +472,8 @@ def month_calendar(hr_employee_id: int, company_id: int, year: int, month: int) 
             typ = "ferie"
         elif iso in leave_by_day:
             typ = "vacances" if leave_by_day[iso] == "vac" else "conge"
-        elif d.weekday() >= 5:
-            typ = "weekend"
+        elif perday.get(d.weekday(), 0.0) == 0:
+            typ = "weekend"   # jour non travaillé (week-end ou repos d'un temps partiel)
         else:
             typ = "work"
         days.append({"date": iso, "weekday": d.weekday(),
@@ -692,8 +717,7 @@ def hours_overview(hr_employee_id: int) -> dict:
     """Réalisé vs dû (écoulé) pour le jour / le mois / l'année, avec % et heures sup.
     Le dû ne compte que les jours ouvrés ÉCOULÉS (pas les mois/jours à venir)."""
     now = datetime.now(TZ)
-    weekly = _employee_weekly_hours(hr_employee_id)
-    daily = weekly / 5
+    perday = _employee_daily_hours(hr_employee_id)
     year_start = datetime(now.year, 1, 1, tzinfo=TZ)
     start_utc = year_start.astimezone(timezone.utc).strftime(ODOO_FMT)
     now_utc = now.astimezone(timezone.utc).strftime(ODOO_FMT)
@@ -717,17 +741,17 @@ def hours_overview(hr_employee_id: int) -> dict:
     end_excl = datetime(now.year, now.month, now.day, tzinfo=TZ) + timedelta(days=1)
     excused = _excused_days(ro, hr_employee_id, year_start, end_excl)
 
-    def weekdays(d0, d1):
-        n, d = 0, d0
+    def due_between(d0, d1):
+        s, d = 0.0, d0
         while d <= d1:
-            if d.weekday() < 5 and d.isoformat() not in excused:
-                n += 1
+            if d.isoformat() not in excused:
+                s += perday.get(d.weekday(), 0.0)
             d += timedelta(days=1)
-        return n
+        return s
 
-    due_day = 0.0 if (today.weekday() >= 5 or today.isoformat() in excused) else daily
-    due_month = weekdays(today.replace(day=1), today) * daily
-    due_year = weekdays(today.replace(month=1, day=1), today) * daily
+    due_day = 0.0 if today.isoformat() in excused else perday.get(today.weekday(), 0.0)
+    due_month = due_between(today.replace(day=1), today)
+    due_year = due_between(today.replace(month=1, day=1), today)
 
     def pack(w, due):
         pct = round(w / due * 100) if due > 0 else (100 if w > 0 else 0)

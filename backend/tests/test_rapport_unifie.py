@@ -1,5 +1,6 @@
 """Backend du rapport unifié (company-aware) : /resources, facture depuis un
 rapport de planning, resource_id + parts + remarques sur création, Remarques worksheet."""
+from datetime import datetime
 from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
@@ -232,3 +233,20 @@ def test_attendance_summary_no_excused_full_due(monkeypatch):
     monkeypatch.setattr(odoo, "_excused_days", lambda *a, **k: {})
     res = odoo.attendance_summary(1, "week", 0)
     assert res["due_total"] == 42.0   # 5 jours ouvrés × 8.4
+
+
+def test_attendance_summary_part_time_irregular(monkeypatch):
+    """Temps partiel à horaire irrégulier (ex. Meagan 40% : mar/jeu/ven) : le dû doit
+    suivre la VRAIE répartition du calendrier, pas hebdo÷5 sur lun-ven."""
+    ro = MagicMock(); ro.execute_kw.return_value = []   # aucun pointage
+    # mar=1 4.2h, jeu=3 4.2h, ven=4 8.4h ; lun/mer/sam/dim = repos
+    monkeypatch.setattr(odoo, "_employee_daily_hours", lambda hr: {1: 4.2, 3: 4.2, 4: 8.4})
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    monkeypatch.setattr(odoo, "_excused_days", lambda *a, **k: {})
+    res = odoo.attendance_summary(1, "week", 0)
+    assert res["due_total"] == 16.8
+    by_wd = {datetime.fromisoformat(b["date"]).weekday(): b for b in res["buckets"]}
+    assert by_wd[0]["due"] == 0.0 and by_wd[0]["type"] == "weekend"   # lundi = repos
+    assert by_wd[1]["due"] == 4.2 and by_wd[1]["type"] == "work"      # mardi
+    assert by_wd[2]["due"] == 0.0 and by_wd[2]["type"] == "weekend"   # mercredi = repos
+    assert by_wd[4]["due"] == 8.4 and by_wd[4]["type"] == "work"      # vendredi
