@@ -5,7 +5,7 @@ dédié. Toutes les requêtes sont filtrées sur company_id=5 (Swiss Piscine).
 """
 import sys
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, date
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
@@ -360,13 +360,23 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
     """Données CCNT annuelles pour l'onglet Présence : heures timbrées par mois +
     calendrier des types de jour. Sources : hr.attendance (heures réelles timbrées),
     hr.leave (congés), resource.calendar.leaves (fériés de la société)."""
-    weekly = _employee_weekly_hours(hr_employee_id)
-    hourly = weekly <= 0  # extra / payé à l'heure → pas d'heure théorique
+    ro = get_client()
+    # employé : calendrier (nom + durée hebdo) + date d'entrée
+    emp = ro.execute_kw("hr.employee", "read", [[hr_employee_id]],
+                        {"fields": ["resource_calendar_id", "date_start", "contract_date_start"]})
+    cal_name, weekly = "", 0.0
+    if emp and emp[0].get("resource_calendar_id"):
+        cal_name = emp[0]["resource_calendar_id"][1] or ""
+        _c = ro.execute_kw("resource.calendar", "read", [[emp[0]["resource_calendar_id"][0]]],
+                           {"fields": ["hours_per_week"]})
+        weekly = (_c[0].get("hours_per_week") or 0.0) if _c else 0.0
+    hire = (emp[0].get("date_start") or emp[0].get("contract_date_start")) if emp else None
+    # à l'heure (extra) : calendrier « Extra » ou sans heures → pas de théorique ni décompte
+    hourly = ("extra" in cal_name.lower()) or weekly <= 0
     start_local = datetime(year, 1, 1, tzinfo=TZ)
     end_local = datetime(year + 1, 1, 1, tzinfo=TZ)
     start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
     end_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
-    ro = get_client()
 
     # 1) timbrage : heures par jour
     atts = ro.execute_kw(
@@ -437,11 +447,50 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
             calendar.append({"date": iso, "type": "work", "hours": round(worked_by_day[iso], 1)})
         cur += timedelta(days=1)
 
+    # 5) décompte « au % » à jour au jour J (règle CCNT : Odoo = source de vérité).
+    #    théorique = ((présence − absences) / 7) × hebdo ; vacances pris(calendaires)/droit(allocation).
+    decompte = None
+    if not hourly:
+        today = datetime.now(TZ).date()
+        y0, y1 = date(year, 1, 1), date(year, 12, 31)
+        cutoff = min(max(today, y0), y1)  # « aujourd'hui » borné à l'année
+        try:
+            hire_d = datetime.fromisoformat(str(hire)[:10]).date() if hire else y0
+        except (ValueError, TypeError):
+            hire_d = y0
+        pstart = max(hire_d, y0)
+        presence = (cutoff - pstart).days + 1 if cutoff >= pstart else 0
+        absc = {"vac": 0, "mal": 0, "mat": 0, "acc": 0, "mil": 0}
+        for iso, cat in leave_by_day.items():
+            if cat in absc and date.fromisoformat(iso) <= cutoff:
+                absc[cat] += 1
+        ferie_td = sum(1 for iso in holiday_days if date.fromisoformat(iso) <= cutoff)
+        worked_h = round(sum(h for iso, h in worked_by_day.items() if date.fromisoformat(iso) <= cutoff), 1)
+        worked_d = sum(1 for iso, h in worked_by_day.items() if h > 0 and date.fromisoformat(iso) <= cutoff)
+        absences = sum(absc.values())
+        net = max(presence - absences, 0)
+        vac_droit = 0.0
+        try:
+            al = ro.execute_kw(
+                "hr.leave.allocation", "search_read",
+                [[["employee_id", "=", hr_employee_id], ["work_entry_type_id", "in", [237, 444]], ["state", "=", "validate"]]],
+                {"fields": ["number_of_days", "date_from"]})
+            vac_droit = round(sum(a.get("number_of_days") or 0 for a in al if str(a.get("date_from", "")).startswith(str(year))), 1)
+        except Exception:
+            pass
+        decompte = {
+            "presence": presence,
+            "jours_travailles": worked_d,
+            "heures": {"fait": worked_h, "du": round(net / 7 * weekly, 1)},
+            "vacances": {"pris": absc["vac"], "droit": vac_droit},
+            "repos": {"pris": max(presence - worked_d - absences - ferie_td, 0), "dus": round(net / 7 * 2, 1)},
+        }
+
     return {
         "year": year, "hourly": hourly, "weekly": round(weekly, 1),
         "worked_total": round(sum(worked_by_day.values()), 1),
         "worked_days": sum(1 for h in worked_by_day.values() if h > 0),
-        "months": months, "calendar": calendar,
+        "months": months, "calendar": calendar, "decompte": decompte,
     }
 
 

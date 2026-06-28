@@ -24,6 +24,11 @@ function injectStyle() {
    .ccnt-stats .s{background:var(--white);border:1px solid var(--line);border-radius:11px;padding:9px;text-align:center}
    .ccnt-stats .s b{display:block;font-size:1.1rem;color:var(--navy);font-family:var(--font-display)}
    .ccnt-stats .s span{font-size:.62rem;color:var(--muted)}
+   .ccnt-dec{width:100%;border-collapse:collapse;font-size:.9rem;margin:4px 0 12px}
+   .ccnt-dec td{padding:10px 2px;border-top:1px solid var(--line);color:var(--ink)}
+   .ccnt-dec tr:first-child td{border-top:0}
+   .ccnt-dec td.n{text-align:right;font-weight:800;color:var(--navy);font-family:var(--font-display)}
+   .ccnt-dec td.n small{color:var(--muted);font-weight:600;font-size:.8rem}
    .ccnt-months{display:flex;gap:4px;overflow-x:auto;padding-bottom:8px;margin-bottom:8px}
    .ccnt-months button{flex:0 0 auto;border:1px solid var(--line);background:#fff;color:var(--muted);font-size:.7rem;padding:5px 9px;border-radius:8px;cursor:pointer}
    .ccnt-months button.on{background:var(--aqua-dark);color:#fff;border-color:var(--aqua-dark)}
@@ -82,21 +87,40 @@ export async function renderCcnt(host) {
   const monthBtns = (data.months || []).map((m) =>
     `<button data-m="${m.m}" class="${m.m === curMonth ? "on" : ""}">${MN[m.m - 1]}</button>`).join("");
 
-  host.innerHTML = `
-    <div class="card">
-      <div class="card-head"><div class="t"><b>Ma CCNT ${data.year}</b></div></div>
+  const dec = data.decompte;
+  let summary;
+  if (dec) {  // employé AU % : décompte « réalisé / dû » à ce jour
+    const avance = (dec.heures.fait || 0) - (dec.heures.du || 0);
+    summary = `
+      <div class="ccnt-hero">
+        <span class="eb">Heures travaillées ${data.year} — à ce jour</span>
+        <div class="big">${f1(dec.heures.fait)} <span>/ ${f1(dec.heures.du)} h dues</span></div>
+        <div class="sub">${avance >= 0 ? "+" + f1(avance) + " h d'avance" : f1(-avance) + " h de retard"}</div>
+      </div>
+      <table class="ccnt-dec">
+        <tr><td>Jours travaillés</td><td class="n">${dec.jours_travailles}</td></tr>
+        <tr><td>Vacances prises</td><td class="n">${f1(dec.vacances.pris)} <small>sur ${f1(dec.vacances.droit)}</small></td></tr>
+        <tr><td>Jours de repos</td><td class="n">${f1(dec.repos.pris)} <small>sur ${f1(dec.repos.dus)}</small></td></tr>
+      </table>`;
+  } else {  // employé À L'HEURE : heures timbrées, pas de décompte théorique
+    summary = `
       <div class="ccnt-hero">
         <span class="eb">Heures timbrées ${data.year}</span>
         <div class="big">${f1(data.worked_total)} <span>h</span></div>
-        <div class="sub">${data.worked_days} jours travaillés${data.hourly ? " · payé à l'heure" : ""}</div>
+        <div class="sub">${data.worked_days} jours travaillés · payé à l'heure</div>
       </div>
-      <div class="ccnt-mbars">${bars}</div>
       <div class="ccnt-stats">
         <div class="s"><b>${data.worked_days}</b><span>Jours</span></div>
         <div class="s"><b>${count("vac")}</b><span>Vacances</span></div>
         <div class="s"><b>${count("mal")}</b><span>Maladie</span></div>
         <div class="s"><b>${count("ferie")}</b><span>Fériés</span></div>
-      </div>
+      </div>`;
+  }
+  host.innerHTML = `
+    <div class="card">
+      <div class="card-head"><div class="t"><b>Ma CCNT ${data.year}</b></div></div>
+      ${summary}
+      <div class="ccnt-mbars">${bars}</div>
       <div style="font-size:.8rem;font-weight:700;color:var(--navy);margin:6px 0 8px">📆 Mon calendrier</div>
       <div class="ccnt-months">${monthBtns}</div>
       <div id="ccnt-calwrap">${calMonth(data.year, curMonth, byDay)}</div>
