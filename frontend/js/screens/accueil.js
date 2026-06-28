@@ -89,7 +89,7 @@ export const accueil = {
 };
 
 // --- Bandeau hero (carrousel photos réalisations) ----------------------------
-const HERO_PHOTOS = ["img/hero/hero1.webp", "img/hero/hero2.webp", "img/hero/hero3.webp"];
+const HERO_PHOTOS = ["/img/hero/hero1.webp", "/img/hero/hero2.webp", "/img/hero/hero3.webp"];
 let heroTimer = null;
 
 function heroCarousel() {
