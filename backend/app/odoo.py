@@ -316,6 +316,111 @@ def attendance_days(hr_employee_id: int, num_days: int = 30) -> dict:
     return {"days": days}
 
 
+def _ccnt_leave_cat(name: str | None) -> str:
+    """Catégorie CCNT d'un type de congé (pour le calendrier Présence)."""
+    n = (name or "").lower()
+    if "vacance" in n or "paid time off" in n:
+        return "vac"
+    if "maladie" in n or "illness" in n or "sick" in n:
+        return "mal"
+    if "accident" in n:
+        return "acc"
+    if "maternit" in n or "maternity" in n or "paternit" in n:
+        return "mat"
+    if "militaire" in n or "military" in n:
+        return "mil"
+    return "conge"
+
+
+def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
+    """Données CCNT annuelles pour l'onglet Présence : heures timbrées par mois +
+    calendrier des types de jour. Sources : hr.attendance (heures réelles timbrées),
+    hr.leave (congés), resource.calendar.leaves (fériés de la société)."""
+    weekly = _employee_weekly_hours(hr_employee_id)
+    hourly = weekly <= 0  # extra / payé à l'heure → pas d'heure théorique
+    start_local = datetime(year, 1, 1, tzinfo=TZ)
+    end_local = datetime(year + 1, 1, 1, tzinfo=TZ)
+    start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    ro = get_client()
+
+    # 1) timbrage : heures par jour
+    atts = ro.execute_kw(
+        "hr.attendance", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start_utc], ["check_in", "<", end_utc]]],
+        {"fields": ["check_in", "worked_hours"]},
+    )
+    worked_by_day: dict[str, float] = {}
+    for a in atts:
+        d = _parse_odoo_dt(a["check_in"]).astimezone(TZ).date().isoformat()
+        worked_by_day[d] = worked_by_day.get(d, 0.0) + (a.get("worked_hours") or 0.0)
+
+    # 2) congés (hors refusés/annulés) : jour -> catégorie CCNT
+    leaves = ro.execute_kw(
+        "hr.leave", "search_read",
+        [[["employee_id", "=", hr_employee_id], ["state", "not in", ["refuse", "cancel"]],
+          ["request_date_from", "<=", f"{year}-12-31"], ["request_date_to", ">=", f"{year}-01-01"]]],
+        {"fields": ["work_entry_type_id", "request_date_from", "request_date_to"]},
+    )
+    leave_by_day: dict[str, str] = {}
+    for lv in leaves:
+        cat = _ccnt_leave_cat(lv["work_entry_type_id"][1] if lv.get("work_entry_type_id") else None)
+        try:
+            d0 = datetime.fromisoformat(str(lv["request_date_from"])[:10]).date()
+            d1 = datetime.fromisoformat(str(lv["request_date_to"])[:10]).date()
+        except (ValueError, TypeError):
+            continue
+        cur = d0
+        while cur <= d1:
+            if cur.year == year:
+                leave_by_day.setdefault(cur.isoformat(), cat)
+            cur += timedelta(days=1)
+
+    # 3) fériés de la société (resource.calendar.leaves globaux) -> jour local
+    holiday_days: set[str] = set()
+    try:
+        hols = ro.execute_kw(
+            "resource.calendar.leaves", "search_read",
+            [[["resource_id", "=", False], ["company_id", "=", company_id],
+              ["date_from", ">=", start_utc], ["date_from", "<", end_utc]]],
+            {"fields": ["date_from"]},
+        )
+        for h in hols:
+            holiday_days.add(_parse_odoo_dt(h["date_from"]).astimezone(TZ).date().isoformat())
+    except Exception:
+        pass
+
+    # 4) agrégat mensuel + calendrier jour par jour
+    months = [{"m": m, "hours": 0.0, "days": 0} for m in range(1, 13)]
+    for d_iso, h in worked_by_day.items():
+        mo = int(d_iso[5:7])
+        months[mo - 1]["hours"] += h
+        if h > 0:
+            months[mo - 1]["days"] += 1
+    for mm in months:
+        mm["hours"] = round(mm["hours"], 1)
+
+    calendar: list[dict] = []
+    cur = start_local.date()
+    last = (end_local - timedelta(days=1)).date()
+    while cur <= last:
+        iso = cur.isoformat()
+        if iso in holiday_days:
+            calendar.append({"date": iso, "type": "ferie"})
+        elif iso in leave_by_day:
+            calendar.append({"date": iso, "type": leave_by_day[iso]})
+        elif worked_by_day.get(iso, 0.0) > 0:
+            calendar.append({"date": iso, "type": "work", "hours": round(worked_by_day[iso], 1)})
+        cur += timedelta(days=1)
+
+    return {
+        "year": year, "hourly": hourly, "weekly": round(weekly, 1),
+        "worked_total": round(sum(worked_by_day.values()), 1),
+        "worked_days": sum(1 for h in worked_by_day.values() if h > 0),
+        "months": months, "calendar": calendar,
+    }
+
+
 def hours_overview(hr_employee_id: int) -> dict:
     """Réalisé vs dû (écoulé) pour le jour / le mois / l'année, avec % et heures sup.
     Le dû ne compte que les jours ouvrés ÉCOULÉS (pas les mois/jours à venir)."""

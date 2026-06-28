@@ -49,6 +49,25 @@ def overview(emp=Depends(get_current_employee)):
     return odoo.hours_overview(emp["hr_employee_id"])
 
 
+HHC_COMPANY_ID = 1  # Heiwa Hospitality Concept — seule société avec la vue CCNT (V1)
+
+
+@router.get("/ccnt")
+def ccnt(year: int | None = None, emp=Depends(get_current_employee)):
+    """Vue CCNT annuelle (HHC uniquement) : heures timbrées par mois + calendrier
+    des types de jour (travail/férié/congé). Désactivée pour les autres sociétés."""
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
+    if company_id != HHC_COMPANY_ID:
+        return {"enabled": False}
+    y = year or datetime.now().year
+    try:
+        data = odoo.ccnt_year(emp["hr_employee_id"], company_id, y)
+    except Exception:
+        raise odoo_unavailable()
+    data["enabled"] = True
+    return data
+
+
 @router.post("/check-in")
 def check_in(body: Punch | None = None, emp=Depends(get_current_employee)):
     b = body or Punch()

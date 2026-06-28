@@ -3,6 +3,8 @@
 import { api } from "../api.js";
 import { fmtClock, escapeHtml, toast } from "../util.js";
 import { icon } from "../icons.js";
+import { profile } from "../store.js";
+import { renderCcnt } from "./ccnt.js";
 
 let timer = null;
 const clearTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
@@ -47,6 +49,13 @@ export const pointer = {
       return;
     }
     draw(root, status, summary, balances, today, days, overview);
+    // Section « Ma CCNT » — HHC uniquement (le backend renvoie enabled:false ailleurs)
+    const me = profile.get();
+    if (me && me.company && me.company.id === 1) {
+      const host = document.createElement("div");
+      root.appendChild(host);
+      renderCcnt(host);
+    }
   },
 };
 
