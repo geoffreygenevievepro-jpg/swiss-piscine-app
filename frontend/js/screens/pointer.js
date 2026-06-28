@@ -214,6 +214,8 @@ function draw(root, status, summary, balances, today, days, overview, cal) {
     </div>
     <p id="punch-msg" style="text-align:center;color:var(--ok);margin:0 0 8px;min-height:1.1em;font-size:.9rem"></p>
 
+    ${overview ? `<div class="gauges" style="margin:6px 0 14px">${gaugeHtml("Aujourd'hui", overview.day)}${gaugeHtml("Ce mois", overview.month)}${gaugeHtml("Cette année", overview.year)}</div>` : ""}
+
     <div class="strip-month">${new Date(today.date + "T00:00:00").toLocaleDateString("fr-CH", { month: "long", year: "numeric" })}</div>
     ${dayStrip(days, today.date)}
 
@@ -225,8 +227,6 @@ function draw(root, status, summary, balances, today, days, overview, cal) {
     <div style="display:flex;gap:8px;margin-bottom:14px">
       ${["day", "week", "month"].map(p => `<button class="chip ${p === period ? "active" : ""}" data-period="${p}" style="flex:1">${{ day: "Jour", week: "Semaine", month: "Mois" }[p]}</button>`).join("")}
     </div>
-
-    ${overview ? `<div class="gauges" style="margin:6px 0 14px">${gaugeHtml("Aujourd'hui", overview.day)}${gaugeHtml("Ce mois", overview.month)}${gaugeHtml("Cette année", overview.year)}</div>` : ""}
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:8px">
