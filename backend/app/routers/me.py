@@ -10,7 +10,12 @@ from ..security import hash_pin, verify_pin
 
 router = APIRouter(tags=["me"])
 
-# Couleur d'accent par défaut par société (Supabase app_rh_company_config peut surcharger).
+# Couleurs de marque curées — PRIORITAIRES sur Supabase (tant que vue.heiwa n'est pas
+# mis à jour). Mettre ici une société quand sa couleur Supabase n'est pas satisfaisante.
+BRAND_COLOR_OVERRIDES = {
+    4: "#2f7d4f",  # Elie Paysage — vert franc (Supabase avait un vert trop foncé/grisé)
+}
+# Couleur d'accent par défaut si ni override ni Supabase.
 DEFAULT_COMPANY_COLORS = {
     5: "#0c5e68",  # Swiss Piscine — teal
     4: "#2f7d4f",  # Elie Paysage — vert (paysagisme)
@@ -47,7 +52,9 @@ def me(emp=Depends(get_current_employee)):
     )["effective_tabs"]
 
     branding = odoo.company_branding(cid)
-    color = supabase_access.company_theme_color(cid) or DEFAULT_COMPANY_COLORS.get(cid, DEFAULT_COLOR)
+    color = (BRAND_COLOR_OVERRIDES.get(cid)
+             or supabase_access.company_theme_color(cid)
+             or DEFAULT_COMPANY_COLORS.get(cid, DEFAULT_COLOR))
 
     return {
         "id": emp["id"],
