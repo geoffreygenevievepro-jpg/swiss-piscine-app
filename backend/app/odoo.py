@@ -785,7 +785,7 @@ def _default_income_account() -> int | None:
 
 def create_draft_invoice(partner_id: int, products: list[dict], discount: float = 0.0,
                          origin: str | None = None,
-                         company_id: int | None = None) -> int:
+                         company_id: int | None = None, slot_id: int | None = None) -> int:
     """Crée une facture client BROUILLON (account.move, move_type=out_invoice).
 
     Lignes catalogue → product_id (Odoo calcule compte + taxes) ; lignes libres → nom +
@@ -816,6 +816,8 @@ def create_draft_invoice(partner_id: int, products: list[dict], discount: float 
     }
     if origin:
         vals["invoice_origin"] = origin
+    if slot_id:
+        vals["x_planning_slot_id"] = int(slot_id)   # lien créneau → bouton « Facture client » sur la fiche
     return rw.execute_kw("account.move", "create", [vals])
 
 
@@ -946,7 +948,7 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
                 bill_partner = None
         if bill_partner:
             try:
-                invoice_id = create_draft_invoice(bill_partner, products, discount, origin=label, company_id=company_id)
+                invoice_id = create_draft_invoice(bill_partner, products, discount, origin=label, company_id=company_id, slot_id=slot_id)
                 rw.execute_kw("planning.slot", "message_post", [[slot_id]],
                               {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
             except Exception:
@@ -1406,7 +1408,7 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
                 slot["partner_id"][0], products,
                 discount=float(report.get("discount") or 0.0),
                 origin=slot.get("name") or report.get("type"),
-                company_id=company_id)
+                company_id=company_id, slot_id=slot_id)
             rw.execute_kw("planning.slot", "message_post", [[slot_id]],
                           {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
         except Exception:

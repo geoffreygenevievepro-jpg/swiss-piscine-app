@@ -53,8 +53,8 @@ def test_submit_report_invoices_with_company(monkeypatch):
     monkeypatch.setattr(odoo, "_fill_worksheet", lambda *a, **k: None)
     seen = {}
 
-    def fake_inv(partner_id, products, discount=0.0, origin=None, company_id=None):
-        seen.update(partner_id=partner_id, products=products, company_id=company_id)
+    def fake_inv(partner_id, products, discount=0.0, origin=None, company_id=None, slot_id=None):
+        seen.update(partner_id=partner_id, products=products, company_id=company_id, slot_id=slot_id)
         return 999
 
     monkeypatch.setattr(odoo, "create_draft_invoice", fake_inv)
@@ -63,6 +63,7 @@ def test_submit_report_invoices_with_company(monkeypatch):
     res = odoo.submit_report(1, "Alex", 5, report)
     assert res["invoice"] is True and res["invoice_id"] == 999
     assert seen["company_id"] == 5 and seen["partner_id"] == 42
+    assert seen["slot_id"] == 5   # facture liée au créneau
     assert [p["name"] for p in seen["products"]] == ["Filtre"]
 
 
@@ -123,7 +124,7 @@ def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
     monkeypatch.setattr(odoo, "_fill_worksheet", lambda ro_, rw_, sid, sctx, rep: cap.update(report_like=rep))
     inv = {}
     monkeypatch.setattr(odoo, "create_draft_invoice",
-                        lambda p, prods, disc, origin=None, company_id=None: inv.update(p=p, cid=company_id) or 777)
+                        lambda p, prods, disc, origin=None, company_id=None, slot_id=None: inv.update(p=p, cid=company_id, slot=slot_id) or 777)
     res = odoo.create_intervention(
         1, "desc", "2026-06-27 06:00:00", "2026-06-27 08:00:00",
         partner_id=42, type_label="Entretien",
@@ -136,7 +137,7 @@ def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
     # L'équipe est assignée via resource_ids (résolu depuis worker_ids/hr_employee_id).
     assert create_vals["resource_ids"] == [(6, 0, [99])]
     assert res["invoice"] is True and res["invoice_id"] == 777
-    assert inv["cid"] == 5 and inv["p"] == 42
+    assert inv["cid"] == 5 and inv["p"] == 42 and inv["slot"] == 100   # facture liée au créneau créé
     assert cap["report_like"]["parts"] == ["Filtre", "Vis"]
     assert cap["report_like"]["remarques"] == "RAS"
 
