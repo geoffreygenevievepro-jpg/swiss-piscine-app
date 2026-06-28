@@ -52,6 +52,7 @@ export async function renderReport(root, ctx = {}) {
     status: null, signed: false,
     workers: slotWorkers.length ? [...slotWorkers] : (meEmp ? [meEmp] : []),  // employee_ids
     resources: [],                                                            // resource_ids (mode create)
+    project: null, projectName: "", task: null,                              // projet / tâche Odoo
   };
 
   root.innerHTML = `
@@ -59,6 +60,16 @@ export async function renderReport(root, ctx = {}) {
     <h2 style="margin-top:0">Rapport d'intervention</h2>
     ${create ? "" : `<p style="color:var(--muted);margin:.2rem 0 16px">${escapeHtml(slot.label || "Intervention")}</p>`}
     ${create ? clientEditable() : clientCard(slot)}
+    <div class="card"><strong>Projet <span class="muted" style="font-weight:400;font-size:.8rem">(optionnel)</span></strong>
+      <input id="r-project" type="text" autocomplete="off" placeholder="Rechercher un projet (nom client)…"
+        style="width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem;margin-top:8px" />
+      <div id="r-project-results"></div>
+      <div id="r-task-wrap" style="display:none;margin-top:10px">
+        <label style="font-size:.82rem;color:var(--muted)">Tâche</label>
+        <select id="r-task" style="width:100%;min-height:46px;border:1px solid var(--line);border-radius:12px;padding:0 12px;font-size:1rem;background:#fbfdfe"><option value="">— Choisir une tâche —</option></select>
+      </div>
+      ${create ? `<div style="font-size:.74rem;color:var(--muted);margin-top:6px">Choisir un projet pré-remplit le client.</div>` : ""}
+    </div>
     <p class="form-error" id="r-error"></p>
 
     <div class="card"><strong>Statut <span style="color:var(--danger)">*</span></strong>
@@ -193,6 +204,39 @@ export async function renderReport(root, ctx = {}) {
     state.status = b.dataset.status;
     statusWrap.querySelectorAll(".chip").forEach(c => c.classList.toggle("active", c === b));
   });
+
+  // --- Projet (recherche) → Tâches + pré-remplissage client (mode create) ---
+  const pj = root.querySelector("#r-project"), pjRes = root.querySelector("#r-project-results");
+  const taskWrap = root.querySelector("#r-task-wrap"), taskSel = root.querySelector("#r-task");
+  let pjTmr = null;
+  pj.addEventListener("input", () => {
+    state.project = null; state.projectName = ""; state.task = null;
+    taskWrap.style.display = "none"; clearTimeout(pjTmr);
+    const q = pj.value.trim(); if (q.length < 2) { pjRes.innerHTML = ""; return; }
+    pjTmr = setTimeout(async () => {
+      try {
+        const list = await api(`/projects/search?q=${encodeURIComponent(q)}`);
+        pjRes.innerHTML = list.map(p => `<div class="card" data-pjid="${p.id}" data-pjname="${escapeHtml(p.name)}" data-partid="${p.partner_id ?? ""}" data-partname="${escapeHtml(p.partner_name || "")}" style="cursor:pointer;padding:10px;margin:6px 0"><strong>${escapeHtml(p.name)}</strong>${p.partner_name ? `<span style="color:var(--muted);font-size:.8rem"> · ${escapeHtml(p.partner_name)}</span>` : ""}</div>`).join("");
+      } catch { pjRes.innerHTML = ""; }
+    }, 300);
+  });
+  pjRes.addEventListener("click", async (e) => {
+    const d = e.target.closest("[data-pjid]"); if (!d) return;
+    state.project = Number(d.dataset.pjid); state.projectName = d.dataset.pjname;
+    pj.value = d.dataset.pjname; pjRes.innerHTML = "";
+    if (create && d.dataset.partid) {
+      const ci = root.querySelector("#r-client"), pid = root.querySelector("#r-partner-id");
+      if (pid) pid.value = d.dataset.partid;
+      if (ci && d.dataset.partname) ci.value = d.dataset.partname;
+    }
+    state.task = null; taskSel.innerHTML = `<option value="">— Choisir une tâche —</option>`;
+    try {
+      const tasks = await api(`/projects/${state.project}/tasks`);
+      taskSel.innerHTML += tasks.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join("");
+      taskWrap.style.display = tasks.length ? "block" : "none";
+    } catch { taskWrap.style.display = "none"; }
+  });
+  taskSel.addEventListener("change", () => { state.task = taskSel.value ? Number(taskSel.value) : null; });
 
   // --- Type (chips) ---
   const typesWrap = root.querySelector("#r-types");
@@ -371,6 +415,7 @@ export async function renderReport(root, ctx = {}) {
           partner_id: pid ? Number(pid) : null, client_name: cname,
           photos, parts, products: billable, discount, vat_rate: vat,
           tag_ids: state.tags, worker_ids: state.workers, resource_ids: state.resources,
+          project_id: state.project, task_id: state.task,
           signature, status: state.status, remarques,
           next_action, next_action_date,
         };
@@ -398,6 +443,7 @@ export async function renderReport(root, ctx = {}) {
           type: state.type, notes, materials, schedule, hours, photos, signature,
           parts, products: billable, discount, vat_rate: vat,
           tag_ids: state.tags, worker_ids: state.workers, resource_ids: state.resources,
+          project_id: state.project, task_id: state.task,
           status: state.status, remarques, next_action, next_action_date,
         };
         await enqueue(slot.id, payload);
