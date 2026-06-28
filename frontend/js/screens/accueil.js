@@ -70,7 +70,6 @@ export const accueil = {
       return;
     }
     dash.innerHTML =
-      heroCarousel() +
       birthdayBanner(bdays) +
       messageBanner(ann, false) +
       meteoCard() +
@@ -84,40 +83,8 @@ export const accueil = {
       todoCard();
     wire(dash, nav);
     loadMeteo(dash);
-    startHero(dash);
   },
 };
-
-// --- Bandeau hero (carrousel photos réalisations) ----------------------------
-const HERO_PHOTOS = ["/img/hero/hero1.webp", "/img/hero/hero2.webp", "/img/hero/hero3.webp"];
-let heroTimer = null;
-
-function heroCarousel() {
-  const imgs = HERO_PHOTOS.map((src, i) =>
-    `<img class="hero-img${i === 0 ? " active" : ""}" src="${src}" alt="" ${i === 0 ? 'loading="eager"' : 'loading="lazy"'} onerror="this.style.display='none'">`).join("");
-  const dots = HERO_PHOTOS.map((_, i) => `<span class="hero-dot${i === 0 ? " active" : ""}"></span>`).join("");
-  return `<div class="hero" id="hero">
-    ${imgs}
-    <div class="hero-overlay"></div>
-    <div class="hero-cap"><span class="hero-eyebrow">Nos réalisations</span></div>
-    <div class="hero-dots">${dots}</div>
-  </div>`;
-}
-
-function startHero(dash) {
-  if (heroTimer) { clearInterval(heroTimer); heroTimer = null; }
-  const hero = dash.querySelector("#hero");
-  if (!hero) return;
-  const imgs = [...hero.querySelectorAll(".hero-img")];
-  const dots = [...hero.querySelectorAll(".hero-dot")];
-  if (imgs.length < 2) return;
-  let i = 0;
-  heroTimer = setInterval(() => {
-    imgs[i].classList.remove("active"); if (dots[i]) dots[i].classList.remove("active");
-    i = (i + 1) % imgs.length;
-    imgs[i].classList.add("active"); if (dots[i]) dots[i].classList.add("active");
-  }, 4500);
-}
 
 function cardHead(title, ic) {
   return `<div class="card-head"><div class="t">${ic ? icon(ic) : ""}<h3>${title}</h3></div>${icon("chevR", "chev")}</div>`;
