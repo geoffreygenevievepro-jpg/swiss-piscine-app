@@ -340,6 +340,73 @@ def attendance_days(hr_employee_id: int, num_days: int = 30) -> dict:
     return {"days": days}
 
 
+def month_calendar(hr_employee_id: int, company_id: int, year: int, month: int) -> dict:
+    """Calendrier mensuel (onglet Présence) : par jour → heures pointées + type
+    (work / weekend / vacances / conge / ferie). Sources : hr.attendance, hr.leave,
+    resource.calendar.leaves (fériés société)."""
+    ro = get_client()
+    start_local = datetime(year, month, 1, tzinfo=TZ)
+    nmonth, nyear = (1, year + 1) if month == 12 else (month + 1, year)
+    end_local = datetime(nyear, nmonth, 1, tzinfo=TZ)
+    start_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    end_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
+    last_day = (end_local - timedelta(days=1)).date().day
+
+    # 1) heures pointées par jour
+    worked_by_day: dict[str, float] = {}
+    for a in ro.execute_kw("hr.attendance", "search_read",
+                           [[["employee_id", "=", hr_employee_id], ["check_in", ">=", start_utc], ["check_in", "<", end_utc]]],
+                           {"fields": ["check_in", "worked_hours"]}):
+        d = _parse_odoo_dt(a["check_in"]).astimezone(TZ).date().isoformat()
+        worked_by_day[d] = worked_by_day.get(d, 0.0) + (a.get("worked_hours") or 0.0)
+
+    # 2) congés (hors refusés/annulés) → catégorie CCNT par jour
+    leave_by_day: dict[str, str] = {}
+    for lv in ro.execute_kw("hr.leave", "search_read",
+                            [[["employee_id", "=", hr_employee_id], ["state", "not in", ["refuse", "cancel"]],
+                              ["request_date_from", "<=", end_local.date().isoformat()],
+                              ["request_date_to", ">=", start_local.date().isoformat()]]],
+                            {"fields": ["work_entry_type_id", "request_date_from", "request_date_to"]}):
+        cat = _ccnt_leave_cat(lv["work_entry_type_id"][1] if lv.get("work_entry_type_id") else None)
+        try:
+            d0 = datetime.fromisoformat(str(lv["request_date_from"])[:10]).date()
+            d1 = datetime.fromisoformat(str(lv["request_date_to"])[:10]).date()
+        except (ValueError, TypeError):
+            continue
+        cur = d0
+        while cur <= d1:
+            if cur.year == year and cur.month == month:
+                leave_by_day.setdefault(cur.isoformat(), cat)
+            cur += timedelta(days=1)
+
+    # 3) fériés de la société
+    holiday_days: set[str] = set()
+    try:
+        for h in ro.execute_kw("resource.calendar.leaves", "search_read",
+                               [[["resource_id", "=", False], ["company_id", "=", company_id],
+                                 ["date_from", ">=", start_utc], ["date_from", "<", end_utc]]],
+                               {"fields": ["date_from"]}):
+            holiday_days.add(_parse_odoo_dt(h["date_from"]).astimezone(TZ).date().isoformat())
+    except Exception:
+        pass
+
+    days = []
+    for dn in range(1, last_day + 1):
+        d = date(year, month, dn)
+        iso = d.isoformat()
+        if iso in holiday_days:
+            typ = "ferie"
+        elif iso in leave_by_day:
+            typ = "vacances" if leave_by_day[iso] == "vac" else "conge"
+        elif d.weekday() >= 5:
+            typ = "weekend"
+        else:
+            typ = "work"
+        days.append({"date": iso, "weekday": d.weekday(),
+                     "worked": round(worked_by_day.get(iso, 0.0), 2), "type": typ})
+    return {"year": year, "month": month, "days": days}
+
+
 def _ccnt_leave_cat(name: str | None) -> str:
     """Catégorie CCNT d'un type de congé (pour le calendrier Présence)."""
     n = (name or "").lower()

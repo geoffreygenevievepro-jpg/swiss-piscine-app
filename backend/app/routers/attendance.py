@@ -44,6 +44,17 @@ def days(num: int = 30, emp=Depends(get_current_employee)):
     return odoo.attendance_days(emp["hr_employee_id"], num)
 
 
+@router.get("/calendar")
+def calendar(month: str | None = None, emp=Depends(get_current_employee)):
+    """Calendrier mensuel (heures + congés/fériés). month = 'YYYY-MM' (défaut : mois courant)."""
+    try:
+        y, m = (int(month[:4]), int(month[5:7])) if month else (datetime.now().year, datetime.now().month)
+    except (ValueError, IndexError, TypeError):
+        y, m = datetime.now().year, datetime.now().month
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.month_calendar(emp["hr_employee_id"], company_id, y, m)
+
+
 @router.get("/overview")
 def overview(emp=Depends(get_current_employee)):
     return odoo.hours_overview(emp["hr_employee_id"])
