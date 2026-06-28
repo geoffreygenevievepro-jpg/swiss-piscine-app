@@ -68,3 +68,10 @@ def test_feries_split():
     worked = {"2026-03-19", "2026-06-10"}  # 03-19 est un férié travaillé
     assert odoo._feries_split(feries, worked) == {"percus": 3, "a_rattraper": 1}
     assert odoo._feries_split([], set()) == {"percus": 0, "a_rattraper": 0}
+
+
+def test_theo_sum():
+    # (jours nets, hebdo) : 160 j à 42h + 59 j à 25.2h
+    assert odoo._theo_sum([(160, 42)]) == 960.0
+    assert round(odoo._theo_sum([(37, 33.6), (59, 25.2)]), 1) == 390.0
+    assert odoo._theo_sum([]) == 0.0
