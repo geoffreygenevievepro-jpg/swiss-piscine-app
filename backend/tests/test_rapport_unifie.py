@@ -217,17 +217,18 @@ def test_attendance_summary_excused_days_zero_due(monkeypatch):
     monkeypatch.setattr(odoo, "get_client", lambda: ro)
     # excuse toute la période → dû 0 partout, donc solde 0
     monkeypatch.setattr(odoo, "_excused_days",
-                        lambda ro_, hr, sl, el: {(sl.date() + _td(days=i)).isoformat()
+                        lambda ro_, hr, sl, el: {(sl.date() + _td(days=i)).isoformat(): "vacances"
                                                  for i in range((el.date() - sl.date()).days)})
     res = odoo.attendance_summary(1, "week", 0)
     assert res["due_total"] == 0.0
     assert all(b["due"] == 0.0 and b["solde"] == 0.0 for b in res["buckets"])
+    assert all(b["type"] == "vacances" for b in res["buckets"])
 
 
 def test_attendance_summary_no_excused_full_due(monkeypatch):
     ro = MagicMock(); ro.execute_kw.return_value = []
     monkeypatch.setattr(odoo, "_employee_weekly_hours", lambda hr: 42.0)
     monkeypatch.setattr(odoo, "get_client", lambda: ro)
-    monkeypatch.setattr(odoo, "_excused_days", lambda *a, **k: set())
+    monkeypatch.setattr(odoo, "_excused_days", lambda *a, **k: {})
     res = odoo.attendance_summary(1, "week", 0)
     assert res["due_total"] == 42.0   # 5 jours ouvrés × 8.4

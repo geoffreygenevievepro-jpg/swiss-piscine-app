@@ -224,20 +224,26 @@ def _employee_weekly_hours(hr_employee_id: int) -> float:
     return 42.5
 
 
-def _excused_days(ro, hr_employee_id: int, start_local, end_local) -> set:
-    """Jours (ISO local) d'absence justifiée sur [start, end[ : congés (hr.leave non
-    refusés/annulés, tous types) + fériés de la société. Sur ces jours le 'dû' = 0,
-    donc une absence justifiée ne crée jamais de déficit d'heures."""
+_EXCUSE_TYPE = {"vac": "vacances", "mal": "maladie", "acc": "accident"}
+
+
+def _excused_days(ro, hr_employee_id: int, start_local, end_local) -> dict:
+    """{date_iso: type} des jours d'absence justifiée sur [start, end[ : congés
+    (hr.leave non refusés/annulés, par type) + fériés de la société. Sur ces jours le
+    'dû' = 0 (une absence justifiée ne crée jamais de déficit). type ∈
+    vacances|maladie|accident|conge|ferie. (Le test d'appartenance `in` marche : ce
+    sont les dates en clés.)"""
     company_id = employee_company_id(hr_employee_id)
     s_utc = start_local.astimezone(timezone.utc).strftime(ODOO_FMT)
     e_utc = end_local.astimezone(timezone.utc).strftime(ODOO_FMT)
     sd, ed = start_local.date(), (end_local - timedelta(days=1)).date()
-    out: set = set()
+    out: dict = {}
     try:
         for lv in ro.execute_kw("hr.leave", "search_read",
                                 [[["employee_id", "=", hr_employee_id], ["state", "not in", ["refuse", "cancel"]],
                                   ["request_date_from", "<=", ed.isoformat()], ["request_date_to", ">=", sd.isoformat()]]],
-                                {"fields": ["request_date_from", "request_date_to"]}):
+                                {"fields": ["work_entry_type_id", "request_date_from", "request_date_to"]}):
+            typ = _EXCUSE_TYPE.get(_ccnt_leave_cat(lv["work_entry_type_id"][1] if lv.get("work_entry_type_id") else None), "conge")
             try:
                 d0 = datetime.fromisoformat(str(lv["request_date_from"])[:10]).date()
                 d1 = datetime.fromisoformat(str(lv["request_date_to"])[:10]).date()
@@ -245,7 +251,7 @@ def _excused_days(ro, hr_employee_id: int, start_local, end_local) -> set:
                 continue
             cur, stop = max(d0, sd), min(d1, ed)
             while cur <= stop:
-                out.add(cur.isoformat())
+                out.setdefault(cur.isoformat(), typ)
                 cur += timedelta(days=1)
     except Exception:
         pass
@@ -254,7 +260,7 @@ def _excused_days(ro, hr_employee_id: int, start_local, end_local) -> set:
                                [[["resource_id", "=", False], ["company_id", "=", company_id],
                                  ["date_from", ">=", s_utc], ["date_from", "<", e_utc]]],
                                {"fields": ["date_from"]}):
-            out.add(_parse_odoo_dt(h["date_from"]).astimezone(TZ).date().isoformat())
+            out.setdefault(_parse_odoo_dt(h["date_from"]).astimezone(TZ).date().isoformat(), "ferie")
     except Exception:
         pass
     return out
@@ -309,9 +315,11 @@ def attendance_summary(hr_employee_id: int, period: str = "week", offset: int = 
     excused = _excused_days(ro, hr_employee_id, start_local, end_local)
     buckets = []
     for d in dates:
-        due = 0.0 if (d.weekday() >= 5 or d.isoformat() in excused) else round(daily, 2)
-        w = round(worked_by[d.isoformat()], 2)
-        buckets.append({"date": d.isoformat(), "worked": w, "due": due, "solde": round(w - due, 2)})
+        iso = d.isoformat()
+        due = 0.0 if (d.weekday() >= 5 or iso in excused) else round(daily, 2)
+        w = round(worked_by[iso], 2)
+        typ = excused.get(iso) or ("weekend" if d.weekday() >= 5 else "work")
+        buckets.append({"date": iso, "worked": w, "due": due, "solde": round(w - due, 2), "type": typ})
     worked_total = round(sum(worked_by.values()), 2)
     due_total = round(sum(b["due"] for b in buckets), 1)   # exclut les jours d'absence justifiée
     return {

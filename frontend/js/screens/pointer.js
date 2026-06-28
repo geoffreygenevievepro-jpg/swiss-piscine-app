@@ -82,14 +82,24 @@ function periodTitle(start) {
     : `${d.toLocaleDateString("fr-CH", { day: "numeric", month: "short" })} – ${end.toLocaleDateString("fr-CH", { day: "numeric", month: "short" })}`;
 }
 
+const TYPE_BADGE = {
+  vacances: { l: "Vacances", bg: "#cfeede", fg: "#1f7a4d" },
+  maladie: { l: "Maladie", bg: "#f6e0c4", fg: "#8a5a12" },
+  accident: { l: "Accident", bg: "#f6d2cc", fg: "#9e3322" },
+  conge: { l: "Congé", bg: "#e2d4f6", fg: "#5b3a9e" },
+  ferie: { l: "Férié", bg: "#cfe0f7", fg: "#2b5fa3" },
+};
+
 function summaryTable(buckets) {
   const todayIso = (() => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; })();
   const rows = buckets.map(b => {
     const d = new Date(b.date + "T00:00:00");
     const isToday = b.date === todayIso;
     const soldeColor = b.solde < 0 ? "var(--danger)" : "var(--ok)";
+    const bd = TYPE_BADGE[b.type];
+    const badge = bd ? ` <span style="display:inline-block;padding:1px 6px;border-radius:5px;font-size:.66rem;font-weight:600;background:${bd.bg};color:${bd.fg}">${bd.l}</span>` : "";
     return `<tr style="${isToday ? "background:var(--aqua-soft)" : ""}">
-      <td style="padding:7px 8px;white-space:nowrap">${d.toLocaleDateString("fr-CH", { weekday: "short", day: "2-digit", month: "2-digit" })}</td>
+      <td style="padding:7px 8px;white-space:nowrap">${d.toLocaleDateString("fr-CH", { weekday: "short", day: "2-digit", month: "2-digit" })}${badge}</td>
       <td style="text-align:right;padding:7px 8px;font-weight:600">${fmtH(b.worked)}</td>
       <td style="text-align:right;padding:7px 8px;color:var(--muted)">${b.due ? fmtH(b.due) : "—"}</td>
       <td style="text-align:right;padding:7px 8px;color:${soldeColor};font-weight:600">${fmtH(b.solde)}</td>
