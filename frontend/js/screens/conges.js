@@ -39,22 +39,26 @@ function draw(root, balances, leaves) {
 }
 
 function leaveHero(balances) {
-  const days = (() => { const v = (balances.leaves || []).find(l => l.unit === "day"); return v ? v.remaining : 0; })();
+  const vac = (balances.leaves || []).find(l => l.unit === "day");
+  const days = vac ? vac.remaining : 0;
+  const alloc = vac && vac.allocated ? vac.allocated : 0;
+  const C = 264;   // circonférence ≈ 2π·42 ; anneau proportionnel au restant/alloué
+  const off = alloc > 0 ? (C * (1 - Math.max(0, Math.min(1, days / alloc)))).toFixed(1) : 36;
   const others = (balances.leaves || []).filter(l => l.unit === "day").slice(1).map(l =>
-    `<div class="leave-type"><div class="v">${l.remaining}</div><div class="l">${escapeHtml(l.label)}</div></div>`).join("");
+    `<div class="leave-type"><div class="v">${l.remaining}${l.allocated ? `<span style="font-size:.6em;color:var(--muted)">/${l.allocated}</span>` : ""}</div><div class="l">${escapeHtml(l.label)}</div></div>`).join("");
   return `<div class="card">
     <div class="leave-hero">
       <div class="ring">
         <svg viewBox="0 0 100 100" style="width:86px;height:86px">
           <circle cx="50" cy="50" r="42" fill="none" stroke="var(--aqua-soft)" stroke-width="9"/>
-          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--aqua)" stroke-width="9" stroke-linecap="round" stroke-dasharray="264" stroke-dashoffset="36" transform="rotate(-90 50 50)"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--aqua)" stroke-width="9" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}" transform="rotate(-90 50 50)"/>
         </svg>
         <span class="num">${days}</span>
       </div>
       <div>
         <div class="eyebrow">Solde de vacances</div>
-        <strong style="font-size:1.15rem">${days} jour${days >= 2 ? "s" : ""} restant${days >= 2 ? "s" : ""}</strong>
-        <div class="muted" style="font-size:.84rem">Allocation ${new Date().getFullYear()}</div>
+        <strong style="font-size:1.15rem">${days} jour${days >= 2 ? "s" : ""} restant${days >= 2 ? "s" : ""}${alloc ? ` sur ${alloc}` : ""}</strong>
+        <div class="muted" style="font-size:.84rem">${alloc ? `Alloués ${new Date().getFullYear()} : ${alloc} jours` : `Allocation ${new Date().getFullYear()}`}</div>
       </div>
     </div>
     ${others ? `<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:14px">${others}</div>` : ""}

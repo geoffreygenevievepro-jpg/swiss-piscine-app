@@ -1668,7 +1668,7 @@ def _leave_types_raw(hr_employee_id: int) -> list[dict]:
     return ro.execute_kw(
         "hr.work.entry.type", "search_read",
         [[["leave_validation_type", "!=", False]]],
-        {"fields": ["name", "request_unit", "virtual_remaining_leaves"],
+        {"fields": ["name", "request_unit", "virtual_remaining_leaves", "max_leaves"],
          "context": {"employee_id": hr_employee_id}},
     )
 
@@ -1680,7 +1680,8 @@ def leave_balances(hr_employee_id: int) -> dict:
         if t.get("virtual_remaining_leaves"):
             icon, label = _friendly_leave(t["name"])
             leaves.append({"label": label, "icon": icon,
-                           "remaining": t["virtual_remaining_leaves"], "unit": t.get("request_unit")})
+                           "remaining": t["virtual_remaining_leaves"],
+                           "allocated": t.get("max_leaves") or 0.0, "unit": t.get("request_unit")})
     leaves.sort(key=lambda x: -x["remaining"])
     emp = get_client().execute_kw("hr.employee", "read", [[hr_employee_id]], {"fields": ["total_overtime"]})
     return {"leaves": leaves, "overtime_hours": emp[0]["total_overtime"] if emp else 0.0}

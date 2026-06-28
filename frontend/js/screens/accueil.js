@@ -182,10 +182,12 @@ function gauge(label, x) {
 function resumeCard(ov, balances) {
   const vac = (balances.leaves || []).find(l => l.unit === "day");
   const days = vac ? vac.remaining : 0;
+  const alloc = vac && vac.allocated ? vac.allocated : 0;
+  const allocTxt = alloc ? ` sur <strong class="tabular">${alloc}</strong> alloué${alloc >= 2 ? "s" : ""}` : "";
   return `<div class="card dash-link" data-nav="pointer" style="cursor:pointer">
     ${cardHead("Résumé de mes heures", "clock")}
     <div class="gauges">${gauge("Aujourd'hui", ov.day)}${gauge("Ce mois", ov.month)}${gauge("Cette année", ov.year)}</div>
-    <div class="vac-line">${icon("sun", "icon-sm")}<span><strong class="tabular">${days}</strong> jour${days >= 2 ? "s" : ""} de vacances restantes</span></div>
+    <div class="vac-line">${icon("sun", "icon-sm")}<span><strong class="tabular">${days}</strong> jour${days >= 2 ? "s" : ""} de vacances restant${days >= 2 ? "s" : ""}${allocTxt}</span></div>
   </div>`;
 }
 
