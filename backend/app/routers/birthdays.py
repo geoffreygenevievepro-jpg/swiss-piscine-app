@@ -56,7 +56,8 @@ def match_birthdays(emps: list[dict], by_id: dict, today: date, me_id: int) -> l
 
 @router.get("/today")
 def today(emp=Depends(get_current_employee)):
-    emps = odoo.list_employees()
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
+    emps = odoo.list_employees(company_id)
     ids = [e["id"] for e in emps]
     by_id = {}
     if ids:

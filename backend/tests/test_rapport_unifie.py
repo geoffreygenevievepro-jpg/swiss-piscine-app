@@ -110,7 +110,10 @@ def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
         products=[{"name": "Filtre", "qty": 1, "price": 80.0, "billable": True}],
         parts=["Filtre", "Vis"], resource_ids=[7], remarques="RAS")
     create_vals = rw.execute_kw.call_args_list[0].args[2][0]
-    assert create_vals["resource_id"] == 7
+    # planning.slot n'a PAS de champ resource_id (Odoo saas-19.2) → ne JAMAIS l'écrire.
+    assert "resource_id" not in create_vals
+    # L'équipe est assignée via employee_ids (ici hr_employee_id=1 par défaut).
+    assert create_vals["employee_ids"] == [(6, 0, [1])]
     assert res["invoice"] is True and res["invoice_id"] == 777
     assert inv["cid"] == 5 and inv["p"] == 42
     assert cap["report_like"]["parts"] == ["Filtre", "Vis"]
