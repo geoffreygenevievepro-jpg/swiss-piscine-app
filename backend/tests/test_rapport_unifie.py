@@ -139,3 +139,40 @@ def test_create_intervention_resource_parts_remarques_billing(monkeypatch):
     assert inv["cid"] == 5 and inv["p"] == 42
     assert cap["report_like"]["parts"] == ["Filtre", "Vis"]
     assert cap["report_like"]["remarques"] == "RAS"
+
+
+# --- #2 : Projet / Tâche ---------------------------------------------------
+def test_search_projects_scoped(monkeypatch):
+    ro = MagicMock()
+    ro.execute_kw.return_value = [{"id": 107, "name": "Mario Constante", "partner_id": [42, "Mario"]}]
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    out = odoo.search_projects("mario", 5)
+    assert out == [{"id": 107, "name": "Mario Constante", "partner_id": 42, "partner_name": "Mario"}]
+    domain = ro.execute_kw.call_args.args[2][0]
+    assert ["company_id", "=", 5] in domain
+
+
+def test_create_intervention_writes_project_task(monkeypatch):
+    rw = MagicMock(); rw.execute_kw.return_value = 100
+    ro = MagicMock(); ro.execute_kw.return_value = [{"name": "Alex", "resource_id": [99, "Alex"]}]
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 5)
+    monkeypatch.setattr(odoo, "get_write_client", lambda: rw)
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    monkeypatch.setattr(odoo, "_fill_worksheet", lambda *a, **k: None)
+    odoo.create_intervention(1, "d", "2026-06-28 06:00:00", "2026-06-28 08:00:00",
+                             type_label="E", project_id=107, task_id=4899)
+    create_vals = rw.execute_kw.call_args_list[0].args[2][0]
+    assert create_vals["project_id"] == 107 and create_vals["task_id"] == 4899
+
+
+def test_submit_report_links_project_task(monkeypatch):
+    ro = MagicMock(); ro.execute_kw.return_value = _slot_rows()
+    rw = MagicMock()
+    monkeypatch.setattr(odoo, "employee_company_id", lambda hr: 5)
+    monkeypatch.setattr(odoo, "get_client", lambda: ro)
+    monkeypatch.setattr(odoo, "get_write_client", lambda: rw)
+    monkeypatch.setattr(odoo, "_fill_worksheet", lambda *a, **k: None)
+    odoo.submit_report(1, "Alex", 5, {"type": "E", "project_id": 107, "task_id": 4899, "products": []})
+    link = [c for c in rw.execute_kw.call_args_list
+            if c.args[0] == "planning.slot" and c.args[1] == "write" and "project_id" in c.args[2][1]]
+    assert link and link[0].args[2][1] == {"project_id": 107, "task_id": 4899}

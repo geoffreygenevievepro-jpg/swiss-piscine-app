@@ -37,8 +37,10 @@ class NewIntervention(BaseModel):
     next_action: str | None = None               # rappel | appel | devis (prochaine action)
     next_action_date: str | None = None          # YYYY-MM-DD (échéance)
     parts: list[str] = []                        # noms de TOUTES les lignes (worksheet « Pièces utilisées »)
-    resource_ids: list[int] = []                 # resource.resource (resource_id principal du slot)
+    resource_ids: list[int] = []                 # resource.resource (équipe sur le créneau)
     remarques: str | None = None                 # champ libre worksheet « Remarques »
+    project_id: int | None = None                # projet Odoo (optionnel)
+    task_id: int | None = None                   # tâche du projet (optionnel)
 
 
 class NewPartner(BaseModel):
@@ -63,6 +65,8 @@ class Report(BaseModel):
     worker_ids: list[int] = []        # employés ayant travaillé sur cette tâche
     next_action: str | None = None    # rappel | appel | devis | rien
     next_action_date: str | None = None  # YYYY-MM-DD (échéance de l'activité)
+    project_id: int | None = None     # projet Odoo (optionnel)
+    task_id: int | None = None        # tâche du projet (optionnel)
     products: list[ProductLine] = []  # lignes « à facturer » (facture brouillon)
     discount: float = 0.0             # remise globale % (facture)
     vat_rate: float = 8.1             # TVA % (affichage)
@@ -108,6 +112,7 @@ def create(body: NewIntervention, emp=Depends(get_current_employee)):
             next_action=body.next_action, next_action_date=body.next_action_date,
             schedule=f"{body.start_time} – {body.end_time}",
             parts=body.parts, resource_ids=body.resource_ids, remarques=body.remarques,
+            project_id=body.project_id, task_id=body.task_id,
         )
     except Exception as e:
         raise odoo_unavailable(e)
@@ -126,6 +131,21 @@ def resources(emp=Depends(get_current_employee)):
     """Ressources planning de la société de l'employé courant (picker « Équipe »)."""
     company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
     return odoo.list_resources(company_id)
+
+
+@router.get("/projects/search")
+def projects_search(q: str, emp=Depends(get_current_employee)):
+    """Recherche de projets Odoo (société de l'employé) pour le champ « Projet » du rapport."""
+    if len(q.strip()) < 2:
+        return []
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.search_projects(q.strip(), company_id)
+
+
+@router.get("/projects/{project_id}/tasks")
+def project_tasks(project_id: int, emp=Depends(get_current_employee)):
+    """Tâches d'un projet (champ « Tâche » dépendant du projet choisi)."""
+    return odoo.project_tasks(project_id)
 
 
 @router.get("/partners/search")

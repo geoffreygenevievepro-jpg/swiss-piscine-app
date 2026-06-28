@@ -100,6 +100,30 @@ def list_employees(company_id: int) -> list[dict]:
     )
 
 
+def search_projects(query: str, company_id: int, limit: int = 20) -> list[dict]:
+    """Projets Odoo de la société (recherche par nom) pour le champ « Projet » du rapport.
+    partner_id sert à pré-remplir le client."""
+    rows = get_client().execute_kw(
+        "project.project", "search_read",
+        [[["company_id", "=", company_id], ["name", "ilike", query]]],
+        {"fields": ["name", "partner_id"], "limit": limit, "order": "name"})
+    out = []
+    for r in rows:
+        p = r.get("partner_id")
+        out.append({"id": r["id"], "name": r["name"],
+                    "partner_id": p[0] if p else None,
+                    "partner_name": p[1] if p else None})
+    return out
+
+
+def project_tasks(project_id: int) -> list[dict]:
+    """Tâches d'un projet (pour le champ « Tâche » dépendant du projet)."""
+    rows = get_client().execute_kw(
+        "project.task", "search_read", [[["project_id", "=", int(project_id)]]],
+        {"fields": ["name"], "limit": 100, "order": "name"})
+    return [{"id": r["id"], "name": r["name"]} for r in rows]
+
+
 def list_resources(company_id: int) -> list[dict]:
     """Ressources planning de la société (resource.resource humaines), mappées à
     l'employé. Sert au picker « Équipe sur le chantier » : on garde resource_id
@@ -756,7 +780,8 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
                         materials: str | None = None, next_action: str | None = None,
                         next_action_date: str | None = None, schedule: str | None = None,
                         parts: list[str] | None = None, resource_ids: list[int] | None = None,
-                        remarques: str | None = None) -> dict:
+                        remarques: str | None = None, project_id: int | None = None,
+                        task_id: int | None = None) -> dict:
     """Crée un planning.slot (rôle Technicien, société de l'employé) + remplit la FICHE de chantier
     (worksheet) + note récap + pièces jointes (photos/signature) + facture brouillon si
     « à facturer ». Le client libre n'est créé que pour facturer."""
@@ -783,6 +808,10 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
     }
     if res_ids:
         vals["resource_ids"] = [(6, 0, res_ids)]
+    if project_id:
+        vals["project_id"] = int(project_id)
+    if task_id:
+        vals["task_id"] = int(task_id)
     if partner_id:
         vals["partner_id"] = partner_id
     rw = get_write_client()
@@ -1224,6 +1253,19 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
     # Tags choisis (project.tags) : noms pour la note + écriture sur la tâche/chantier.
     tag_ids = [int(t) for t in (report.get("tag_ids") or [])]
     report["tag_names"] = [t["name"] for t in REPORT_TAGS if t["id"] in tag_ids]
+
+    # Projet / tâche (optionnel) : rattachement du créneau.
+    slot_links = {}
+    if report.get("project_id"):
+        slot_links["project_id"] = int(report["project_id"])
+    if report.get("task_id"):
+        slot_links["task_id"] = int(report["task_id"])
+    if slot_links:
+        try:
+            rw.execute_kw("planning.slot", "write", [[slot_id], slot_links])
+            slot.update(slot_links)
+        except Exception:
+            pass
 
     # Équipe ayant travaillé : assignée au créneau via resource_ids (employee_ids est
     # calculé → non inscriptible). Une lecture nom + ressource.
