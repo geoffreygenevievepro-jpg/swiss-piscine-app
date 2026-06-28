@@ -10,8 +10,10 @@ let timer = null;
 const clearTimer = () => { if (timer) { clearInterval(timer); timer = null; } };
 let period = "week", offset = 0;
 let selectedDay = null;   // YYYY-MM-DD du jour sélectionné dans la bande (null = aujourd'hui)
+let calOffset = 0;        // décalage du calendrier mensuel (0 = mois courant)
 
 const todayISO = () => { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`; };
+const calMonthStr = (off) => { const n = new Date(); const d = new Date(n.getFullYear(), n.getMonth() + off, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
 
 function getPosition() {
   return new Promise((resolve) => {
@@ -34,21 +36,22 @@ export const pointer = {
   async render(root) {
     clearTimer();
     root.innerHTML = `<h2>Présence</h2><div class="placeholder"><div class="big">${icon("clock")}</div>Chargement…</div>`;
-    let status, summary, balances, today, days, overview;
+    let status, summary, balances, today, days, overview, cal;
     try {
-      [status, summary, balances, today, days, overview] = await Promise.all([
+      [status, summary, balances, today, days, overview, cal] = await Promise.all([
         api("/attendance/status"),
         api(`/attendance/summary?period=${period}&offset=${offset}`),
         api("/rh/balances"),
         api(`/attendance/today${selectedDay ? `?date=${selectedDay}` : ""}`),
         api("/attendance/days?num=30"),
         api("/attendance/overview"),
+        api(`/attendance/calendar?month=${calMonthStr(calOffset)}`).catch(() => null),
       ]);
     } catch {
       root.innerHTML = `<h2>Présence</h2><div class="card" style="border-color:var(--danger)">Impossible de joindre le serveur.</div>`;
       return;
     }
-    draw(root, status, summary, balances, today, days, overview);
+    draw(root, status, summary, balances, today, days, overview, cal);
     // Section « Ma CCNT » — HHC uniquement (le backend renvoie enabled:false ailleurs)
     const me = profile.get();
     if (me && me.company && me.company.id === 1) {
@@ -146,7 +149,40 @@ function gaugeHtml(label, x) {
   </div>`;
 }
 
-function draw(root, status, summary, balances, today, days, overview) {
+function monthCalendar(cal) {
+  if (!cal || !Array.isArray(cal.days)) return "";
+  const label = new Date(cal.year, cal.month - 1, 1).toLocaleDateString("fr-CH", { month: "long", year: "numeric" });
+  const firstWd = (new Date(cal.year, cal.month - 1, 1).getDay() + 6) % 7;  // Lun=0
+  const tISO = todayISO();
+  const bgOf = (t) => ({ vacances: "var(--ok-soft)", conge: "var(--violet-soft)", ferie: "var(--aqua-soft)", weekend: "var(--line-soft)" }[t] || "#fff");
+  const fgOf = (t) => ({ vacances: "var(--ok)", conge: "var(--violet)", ferie: "var(--aqua-dark)", weekend: "var(--muted)" }[t] || "var(--ink)");
+  const wdHead = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+    .map(w => `<div style="text-align:center;font-size:.64rem;color:var(--muted);text-transform:uppercase">${w}</div>`).join("");
+  const blanks = Array(firstWd).fill("<div></div>").join("");
+  const cells = cal.days.map(d => {
+    const dn = Number(d.date.slice(8, 10));
+    const isToday = d.date === tISO;
+    const h = d.worked > 0 ? fmtH(d.worked) : "";
+    return `<div style="background:${bgOf(d.type)};color:${fgOf(d.type)};border-radius:8px;min-height:44px;padding:3px 1px;text-align:center;${isToday ? "outline:2px solid var(--aqua-dark);outline-offset:-2px" : "border:1px solid var(--line-soft)"}">
+      <div style="font-size:.74rem;font-weight:700">${dn}</div>
+      <div style="font-size:.64rem" class="tabular">${h}</div>
+    </div>`;
+  }).join("");
+  const legend = [["Vacances", "vacances"], ["Congé / maladie", "conge"], ["Férié", "ferie"], ["Week-end", "weekend"]]
+    .map(([l, t]) => `<span style="display:inline-flex;align-items:center;gap:5px;font-size:.72rem;color:var(--muted)"><span style="width:12px;height:12px;border-radius:3px;background:${bgOf(t)};border:1px solid var(--line)"></span>${l}</span>`).join("");
+  return `<div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <button class="btn secondary nav" id="cal-prev">‹</button>
+      <strong style="font-family:var(--font-display);text-transform:capitalize">${label}</strong>
+      <button class="btn secondary nav" id="cal-next">›</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-bottom:4px">${wdHead}</div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">${blanks}${cells}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:14px">${legend}</div>
+  </div>`;
+}
+
+function draw(root, status, summary, balances, today, days, overview, cal) {
   clearTimer();
   const isIn = status.state === "in";
   const openStart = isIn ? new Date(status.open_since).getTime() : null;
@@ -198,7 +234,9 @@ function draw(root, status, summary, balances, today, days, overview) {
         <button class="btn" id="add-att" style="width:auto;min-height:38px;padding:0 14px">${icon("plus", "icon-sm")} Saisie</button>
       </div>
       <div id="att-list" style="margin-top:10px">${attList(today)}</div>
-    </div>`;
+    </div>
+
+    ${monthCalendar(cal)}`;
 
   // Timbrage
   if (isIn) {
@@ -226,6 +264,11 @@ function draw(root, status, summary, balances, today, days, overview) {
   // Période
   root.querySelector("#prev").addEventListener("click", () => { offset -= 1; pointer.render(root); });
   root.querySelector("#next").addEventListener("click", () => { offset += 1; pointer.render(root); });
+
+  // Calendrier mensuel : navigation mois précédent / suivant
+  const cp = root.querySelector("#cal-prev"), cn = root.querySelector("#cal-next");
+  if (cp) cp.addEventListener("click", () => { calOffset -= 1; pointer.render(root); });
+  if (cn) cn.addEventListener("click", () => { calOffset += 1; pointer.render(root); });
   root.querySelectorAll("[data-period]").forEach(b =>
     b.addEventListener("click", () => { period = b.dataset.period; offset = 0; pointer.render(root); }));
 
