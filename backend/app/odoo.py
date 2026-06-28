@@ -700,16 +700,21 @@ def _day_bounds_utc(date_iso: str | None) -> tuple[str, str]:
     return _today_bounds_utc()
 
 
-def today_interventions(hr_employee_id: int, date_iso: str | None = None) -> dict:
-    """Créneaux planifiés du jour choisi (par défaut aujourd'hui) pour l'employé."""
+def today_interventions(hr_employee_id: int, date_iso: str | None = None,
+                        all_company: bool = False) -> dict:
+    """Créneaux planifiés du jour choisi (par défaut aujourd'hui).
+
+    `all_company=True` (admin/manager) → tous les créneaux de la société ; sinon → ceux
+    assignés à l'employé."""
     client = get_client()
     company_id = employee_company_id(hr_employee_id)
     start, end = _day_bounds_utc(date_iso)
     domain = [
-        ["employee_ids", "in", [hr_employee_id]],
         ["start_datetime", ">=", start],
         ["start_datetime", "<", end],
     ] + _company_domain(company_id)
+    if not all_company:
+        domain = [["employee_ids", "in", [hr_employee_id]]] + domain
     slots = client.execute_kw(
         "planning.slot", "search_read", [domain],
         {"fields": _SLOT_FIELDS, "order": "start_datetime asc"},
