@@ -821,6 +821,20 @@ def create_draft_invoice(partner_id: int, products: list[dict], discount: float 
     return rw.execute_kw("account.move", "create", [vals])
 
 
+def _post_chatter_html(rw, model: str, res_id: int, html: str, attachment_ids=None) -> None:
+    """Poste une note HTML dans le chatter en CONSERVANT le formatage.
+
+    NB : `message_post` échappe un body string passé via XML-RPC (Odoo 19 → les balises
+    s'affichent en brut). On crée la mail.message directement : le champ body est de type
+    html, le HTML est donc conservé. author_id par défaut = utilisateur courant (compte API).
+    """
+    vals = {"model": model, "res_id": res_id, "body": html,
+            "message_type": "comment", "subtype_id": 2}  # subtype 2 = Note interne
+    if attachment_ids:
+        vals["attachment_ids"] = [(6, 0, attachment_ids)]
+    rw.execute_kw("mail.message", "create", [vals])
+
+
 def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc: str,
                         *, partner_id: int | None = None, client_name: str | None = None,
                         type_label: str | None = None, photos: list[str] | None = None,
@@ -900,8 +914,7 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
         products=products or [], discount=discount, vat_rate=vat_rate,
         tag_names=tag_names, employee_name=employee_name, worker_names=worker_names)
     if body:
-        rw.execute_kw("planning.slot", "message_post", [[slot_id]],
-                      {"body": body, "attachment_ids": att_ids})
+        _post_chatter_html(rw, "planning.slot", slot_id, body, att_ids)
 
     # --- Fiche de chantier (worksheet) remplie comme via un rapport ---
     worksheet_ok = False
@@ -949,8 +962,8 @@ def create_intervention(hr_employee_id: int, name: str, start_utc: str, end_utc:
         if bill_partner:
             try:
                 invoice_id = create_draft_invoice(bill_partner, products, discount, origin=label, company_id=company_id, slot_id=slot_id)
-                rw.execute_kw("planning.slot", "message_post", [[slot_id]],
-                              {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
+                _post_chatter_html(rw, "planning.slot", slot_id,
+                                   "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>")
             except Exception:
                 invoice_id = None
 
@@ -1357,10 +1370,8 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
         }]))
 
     # Note récap dans l'historique du CRÉNEAU (regroupé avec la fiche d'intervention).
-    rw.execute_kw("planning.slot", "message_post", [[slot_id]], {
-        "body": _build_report_html(report, employee_name),
-        "attachment_ids": att_ids,
-    })
+    _post_chatter_html(rw, "planning.slot", slot_id,
+                       _build_report_html(report, employee_name), att_ids)
 
     # Tags posés sur la tâche / le chantier (project.tags) quand la cible le supporte.
     tags_applied = False
@@ -1409,8 +1420,8 @@ def submit_report(hr_employee_id: int, employee_name: str, slot_id: int, report:
                 discount=float(report.get("discount") or 0.0),
                 origin=slot.get("name") or report.get("type"),
                 company_id=company_id, slot_id=slot_id)
-            rw.execute_kw("planning.slot", "message_post", [[slot_id]],
-                          {"body": "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>"})
+            _post_chatter_html(rw, "planning.slot", slot_id,
+                               "<p><strong>Facture brouillon créée</strong> — à vérifier et valider par le bureau.</p>")
         except Exception:
             invoice_id = None
 
