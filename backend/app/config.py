@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     # Sécurité login
     max_failed_attempts: int = 5
     lockout_minutes: int = 15
+    # 2FA exigée à la connexion (appareil non fiable). APP_TWOFA_REQUIRED=false pour
+    # la désactiver temporairement (tests) ; true = comportement normal.
+    twofa_required: bool = True
 
     # CORS : origines autorisées pour la PWA (dev local + futur sous-domaine)
     cors_origins: list[str] = [

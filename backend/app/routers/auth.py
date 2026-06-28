@@ -87,10 +87,11 @@ def login(body: LoginRequest, request: Request):
         )
 
     # 2FA : si l'appareil n'est pas de confiance, exiger le 2e facteur.
+    # (désactivable temporairement via APP_TWOFA_REQUIRED=false — tests uniquement.)
     trust = request.cookies.get("sp_trust")
     trusted = bool(trust) and db.is_device_trusted(
         emp["id"], twofa.hash_token(trust), datetime.now(timezone.utc).isoformat())
-    if not trusted:
+    if settings.twofa_required and not trusted:
         pending = create_pre2fa_token(emp["id"])
         if emp["twofa_enabled"]:
             return {"twofa_required": True, "pending_token": pending}
