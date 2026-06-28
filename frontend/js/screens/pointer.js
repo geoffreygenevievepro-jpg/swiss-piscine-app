@@ -184,6 +184,7 @@ function monthCalendar(cal) {
 
 function draw(root, status, summary, balances, today, days, overview, cal) {
   clearTimer();
+  const isHHC = ((profile.get() || {}).company || {}).id === 1;
   const isIn = status.state === "in";
   const openStart = isIn ? new Date(status.open_since).getTime() : null;
   const baseToday = status.today_seconds, t0 = Date.now();
@@ -216,7 +217,7 @@ function draw(root, status, summary, balances, today, days, overview, cal) {
       ${["day", "week", "month"].map(p => `<button class="chip ${p === period ? "active" : ""}" data-period="${p}" style="flex:1">${{ day: "Jour", week: "Semaine", month: "Mois" }[p]}</button>`).join("")}
     </div>
 
-    ${overview ? `<div class="gauges" style="margin:6px 0 14px">${gaugeHtml("Aujourd'hui", overview.day)}${gaugeHtml("Ce mois", overview.month)}${gaugeHtml("Cette année", overview.year)}</div>` : ""}
+    ${!isHHC && overview ? `<div class="gauges" style="margin:6px 0 14px">${gaugeHtml("Aujourd'hui", overview.day)}${gaugeHtml("Ce mois", overview.month)}${gaugeHtml("Cette année", overview.year)}</div>` : ""}
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:8px">
