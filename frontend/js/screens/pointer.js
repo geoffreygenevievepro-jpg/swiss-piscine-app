@@ -92,11 +92,21 @@ function summaryTable(buckets) {
       <td style="text-align:right;padding:7px 8px;color:${soldeColor};font-weight:600">${fmtH(b.solde)}</td>
     </tr>`;
   }).join("");
+  const tw = buckets.reduce((s, b) => s + (b.worked || 0), 0);
+  const td = buckets.reduce((s, b) => s + (b.due || 0), 0);
+  const ts = buckets.reduce((s, b) => s + (b.solde || 0), 0);
+  const tsCol = ts < 0 ? "var(--danger)" : "var(--ok)";
   return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.86rem">
     <thead><tr style="color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em">
       <th style="text-align:left;padding:4px 8px">Date</th><th style="text-align:right;padding:4px 8px">Réalisé</th>
       <th style="text-align:right;padding:4px 8px">À faire</th><th style="text-align:right;padding:4px 8px">Solde</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+    <tbody>${rows}</tbody>
+    <tfoot><tr style="border-top:2px solid var(--line);font-weight:700">
+      <td style="padding:8px">Total</td>
+      <td style="text-align:right;padding:8px">${fmtH(tw)}</td>
+      <td style="text-align:right;padding:8px;color:var(--muted)">${fmtH(td)}</td>
+      <td style="text-align:right;padding:8px;color:${tsCol}">${fmtH(ts)}</td>
+    </tr></tfoot></table></div>`;
 }
 
 // Bande horizontale défilable : un jour par cellule, avec les heures timbrées.
@@ -118,18 +128,21 @@ function dayStrip(days, selectedISO) {
 
 function gaugeHtml(label, x) {
   if (!x) return "";
-  const over = (x.overtime || 0) > 0;
+  const solde = (x.worked || 0) - (x.due || 0);   // heures sup (+) ou déficit (−)
+  const over = solde > 0.001, under = solde < -0.001;
   const L = 132;
   const off = (L * (1 - Math.min(100, x.pct) / 100)).toFixed(1);
-  const col = over ? "#2f8f63" : "#127d89";
+  const col = under ? "var(--danger)" : (over ? "#2f8f63" : "#127d89");
+  const soldeHtml = over ? ` · <span style="color:#2f8f63;font-weight:700">+${fmtH(solde)}</span>`
+    : (under ? ` · <span style="color:var(--danger);font-weight:700">${fmtH(solde)}</span>` : "");
   return `<div class="halfg">
     <div class="halfg-label">${label}</div>
     <svg viewBox="0 0 100 58" class="halfg-svg">
       <path d="M8 50 A42 42 0 0 1 92 50" fill="none" stroke="var(--aqua-soft)" stroke-width="9" stroke-linecap="round"/>
       <path d="M8 50 A42 42 0 0 1 92 50" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${L}" stroke-dashoffset="${off}"/>
-      <text x="50" y="47" text-anchor="middle" class="halfg-pct" fill="${over ? col : "#0c2b38"}">${x.pct}%</text>
+      <text x="50" y="47" text-anchor="middle" class="halfg-pct" fill="${under ? "var(--danger)" : (over ? col : "#0c2b38")}">${x.pct}%</text>
     </svg>
-    <div class="halfg-sub tabular">${fmtH(x.worked)} / ${fmtH(x.due)}${over ? ` · <span class="g-sup">+${fmtH(x.overtime)}</span>` : ""}</div>
+    <div class="halfg-sub tabular">${fmtH(x.worked)} / ${fmtH(x.due)}${soldeHtml}</div>
   </div>`;
 }
 
@@ -225,8 +238,24 @@ function draw(root, status, summary, balances, today, days, overview) {
       selectedDay = c.dataset.day === todayISO() ? null : c.dataset.day;
       pointer.render(root);
     });
+    // Le libellé du mois suit les jours réellement affichés (cellule la plus à gauche).
+    const monthEl = root.querySelector(".strip-month");
+    const updateMonth = () => {
+      if (!monthEl) return;
+      const sLeft = strip.getBoundingClientRect().left;
+      let best = null, bestDist = Infinity;
+      strip.querySelectorAll("[data-day]").forEach(c => {
+        const dist = Math.abs(c.getBoundingClientRect().left - sLeft);
+        if (dist < bestDist) { bestDist = dist; best = c; }
+      });
+      if (best) monthEl.textContent = new Date(best.dataset.day + "T00:00:00")
+        .toLocaleDateString("fr-CH", { month: "long", year: "numeric" });
+    };
+    let mTmr = null;
+    strip.addEventListener("scroll", () => { clearTimeout(mTmr); mTmr = setTimeout(updateMonth, 60); });
     const selCell = strip.querySelector(".day-cell.sel");
     if (selCell) selCell.scrollIntoView({ inline: "center", block: "nearest" });
+    updateMonth();
   }
 
   // Pointages du jour : saisie / édition / suppression
