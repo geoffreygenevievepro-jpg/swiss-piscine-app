@@ -61,7 +61,7 @@ function injectStyle() {
    .ccg{flex:1;text-align:center}.ccgv{font-size:1.1rem;font-weight:800;color:var(--navy);margin-top:-20px}
    .ccgl{font-size:.6rem;color:var(--muted);margin-top:2px}.ccgl b{color:var(--ink);font-size:.64rem}
    .ccnt-solde{display:flex;justify-content:space-between;align-items:center;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:12px;font-size:.85rem}
-   .ccnt-solde .pos{color:#1f7a4d;font-weight:800}.ccnt-solde .neg{color:var(--danger);font-weight:800}
+   .ccnt-solde .pos{color:var(--ok);font-weight:800}.ccnt-solde .neg{color:var(--danger);font-weight:800}
    .ccnt-dec td.n small{font-weight:600}`;
   document.head.appendChild(s);
 }
