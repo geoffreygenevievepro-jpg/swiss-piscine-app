@@ -513,27 +513,29 @@ def _theo_sum(segments: list) -> float:
 # Détection d'anomalies de contrat (le taux d'activité pilote tout le calcul ;
 # il vient du calendrier de contrat, qui peut ne pas refléter le vrai taux).
 # ---------------------------------------------------------------------------
+_FT_HOURS = 42.0  # plein temps de référence (hôtellerie CCNT)
+
+
 def _contract_issues(versions: list, cal_h: dict) -> list[str]:
-    """Anomalies d'un employé : période sans calendrier, ou taux probablement changé
-    sans mise à jour du calendrier (salaire qui varie ≥15% alors que le calendrier reste
-    identique). Détecte le cas « janvier à 50% mais calendrier resté à 100% »."""
+    """Anomalies de contrat : le calendrier de travail doit refléter le TAUX déclaré dans
+    le contrat (`l10n_ch_weekly_hours`, onglet Paie). On flague chaque période dont le
+    calendrier ne correspond pas au taux, ou qui n'a pas de calendrier. Déterministe."""
     issues: list[str] = []
-    vs = sorted([v for v in versions if v.get("date_start")], key=lambda z: str(z["date_start"]))
-    for v in vs:
-        if not v.get("resource_calendar_id"):
-            issues.append(f"Période du {str(v['date_start'])[:10]} sans calendrier de travail")
-    for i in range(1, len(vs)):
-        a, b = vs[i - 1], vs[i]
-        ca, cb = a.get("resource_calendar_id"), b.get("resource_calendar_id")
-        if not ca or not cb:
+    for v in sorted([x for x in versions if x.get("date_start")], key=lambda z: str(z["date_start"])):
+        d = str(v["date_start"])[:10]
+        con_w = v.get("l10n_ch_weekly_hours") or 0.0   # heures hebdo contractuelles (vérité)
+        cal = v.get("resource_calendar_id")
+        if not cal:
+            if con_w > 0:
+                issues.append(f"Période du {d} ({round(con_w / _FT_HOURS * 100)}%) sans calendrier de travail")
             continue
-        ha, hb = cal_h.get(ca[0], 0.0), cal_h.get(cb[0], 0.0)
-        wa, wb = a.get("wage") or 0.0, b.get("wage") or 0.0
-        if wa > 0 and wb > 0 and abs(ha - hb) < 0.1 and abs(wb - wa) / wa >= 0.15:
-            pct = round(ha / 42 * 100) if ha else 0
+        cal_w = cal_h.get(cal[0], 0.0)
+        # On ne compare que les calendriers à heures FIXES (cal_w > 0) : un calendrier
+        # « Extra » (0 h) = employé à l'heure, légitime, pas une anomalie.
+        if con_w > 0 and cal_w > 0.5 and abs(cal_w - con_w) > 0.5:
             issues.append(
-                f"Salaire {wa:.0f}→{wb:.0f} (×{wb / wa:.2f}) au {str(b['date_start'])[:10]} "
-                f"mais calendrier inchangé ({pct}%) — taux d'activité à corriger")
+                f"Période du {d} : calendrier {round(cal_w / _FT_HOURS * 100)}% "
+                f"≠ taux du contrat {round(con_w / _FT_HOURS * 100)}% — calendrier à corriger")
     return issues
 
 
@@ -549,7 +551,7 @@ def employee_contract_issues(hr_employee_id: int) -> list[str]:
     """Anomalies de contrat d'un employé (pour le ⚠️ de la fiche CCNT)."""
     ro = get_client()
     vers = ro.execute_kw("hr.version", "search_read", [[["employee_id", "=", hr_employee_id]]],
-                         {"fields": ["date_start", "date_end", "resource_calendar_id", "wage"]})
+                         {"fields": ["date_start", "date_end", "resource_calendar_id", "l10n_ch_weekly_hours"]})
     return _contract_issues(vers, _calendar_hours_map(ro, vers))
 
 
@@ -563,7 +565,7 @@ def contract_anomalies(company_id: int) -> list[dict]:
         return []
     names = {e["id"]: e["name"] for e in emps}
     vers = ro.execute_kw("hr.version", "search_read", [[["employee_id", "in", ids]]],
-                         {"fields": ["employee_id", "date_start", "date_end", "resource_calendar_id", "wage"]})
+                         {"fields": ["employee_id", "date_start", "date_end", "resource_calendar_id", "l10n_ch_weekly_hours"]})
     cal_h = _calendar_hours_map(ro, vers)
     from collections import defaultdict
     by = defaultdict(list)
@@ -698,7 +700,7 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
         theo_du, repos_dus, presence, periodes = 0.0, 0.0, 0, []
         try:
             vers = ro.execute_kw("hr.version", "search_read", [[["employee_id", "=", hr_employee_id]]],
-                                 {"fields": ["date_start", "date_end", "resource_calendar_id"]})
+                                 {"fields": ["date_start", "date_end", "resource_calendar_id", "l10n_ch_weekly_hours"]})
             cal_ids = list({v["resource_calendar_id"][0] for v in vers if v.get("resource_calendar_id")})
             cal_h = {c["id"]: (c.get("hours_per_week") or 0.0)
                      for c in (ro.execute_kw("resource.calendar", "read", [cal_ids], {"fields": ["hours_per_week"]}) if cal_ids else [])}
@@ -716,7 +718,9 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
                 ps, pe = max(vs, y0), min(ve, cutoff)
                 if ps > pe:
                     continue
-                pw = cal_h.get(v["resource_calendar_id"][0], 0.0)
+                # taux = heures hebdo du CONTRAT (source de vérité, onglet Paie) ;
+                # repli sur le calendrier si le champ contrat est vide.
+                pw = (v.get("l10n_ch_weekly_hours") or 0.0) or cal_h.get(v["resource_calendar_id"][0], 0.0)
                 pdays = (pe - ps).days + 1
                 pabs = sum(1 for iso, cat in leave_by_day.items() if cat in absc and ps <= date.fromisoformat(iso) <= pe)
                 seg_annee.append((max(pdays - pabs, 0), pw))
