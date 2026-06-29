@@ -31,27 +31,46 @@ export const admin = {
     }
     root.innerHTML = `<h2>Admin</h2><div id="adm"><div class="placeholder"><div class="big">${icon("users")}</div>Chargement…</div></div>`;
     const zone = root.querySelector("#adm");
-    let hours, leaves;
+    let hours, leaves, anomalies;
     try {
-      [hours, leaves, announcement] = await Promise.all([
+      [hours, leaves, announcement, anomalies] = await Promise.all([
         api("/admin/employees-hours"), api("/admin/leaves"), api("/announcement").catch(() => ({})),
+        api("/admin/contract-anomalies").catch(() => []),
       ]);
     } catch {
       zone.innerHTML = `<div class="card" style="border-color:var(--danger)">Impossible de charger les données admin.</div>`;
       return;
     }
-    draw(root, zone, hours, leaves);
+    draw(root, zone, hours, leaves, anomalies);
   },
 };
 
-function draw(root, zone, hours, leaves) {
-  zone.innerHTML = messageBanner(announcement, true) + hoursCard(hours) + leavesSection(leaves);
+function draw(root, zone, hours, leaves, anomalies) {
+  zone.innerHTML = messageBanner(announcement, true) + anomaliesCard(anomalies) + hoursCard(hours) + leavesSection(leaves);
   wireBanner(zone);
   zone.querySelectorAll("[data-lv]").forEach(b =>
     b.addEventListener("click", () => { leaveView = b.dataset.lv; monthOffset = leaveView === "calendrier" ? monthOffset : 0; draw(root, zone, hours, leaves); }));
   const prev = zone.querySelector("#m-prev"), next = zone.querySelector("#m-next");
   if (prev) prev.addEventListener("click", () => { monthOffset -= 1; draw(root, zone, hours, leaves); });
   if (next) next.addEventListener("click", () => { monthOffset += 1; draw(root, zone, hours, leaves); });
+}
+
+// --- Contrats à vérifier -----------------------------------------------------
+function anomaliesCard(anomalies) {
+  const list = anomalies || [];
+  if (!list.length) {
+    return `<div class="card" style="border-color:#c7e6d3;background:#f3fbf6">
+      ${cardHead("Contrats à vérifier", "check")}
+      <div style="font-size:.86rem;color:var(--ok);margin-top:6px">✅ Aucun contrat incohérent détecté.</div></div>`;
+  }
+  const rows = list.map(a => `<div style="padding:9px 0;border-top:1px solid var(--line)">
+      <strong>${escapeHtml(a.name)}</strong>
+      <div style="font-size:.82rem;color:var(--danger);margin-top:2px">${(a.issues || []).map(escapeHtml).join("<br>")}</div>
+    </div>`).join("");
+  return `<div class="card" style="border-color:#ecc7c1;background:#fdf4f2">
+    ${cardHead("Contrats à vérifier", "alert")}
+    <div style="font-size:.8rem;color:var(--muted);margin:2px 0 4px">À corriger dans Odoo (le calendrier de contrat doit refléter le vrai taux). Sinon les heures CCNT seront fausses.</div>
+    ${rows}</div>`;
 }
 
 // --- Heures par employé ------------------------------------------------------

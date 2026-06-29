@@ -509,6 +509,75 @@ def _theo_sum(segments: list) -> float:
     return sum(net / 7 * weekly for net, weekly in segments)
 
 
+# ---------------------------------------------------------------------------
+# Détection d'anomalies de contrat (le taux d'activité pilote tout le calcul ;
+# il vient du calendrier de contrat, qui peut ne pas refléter le vrai taux).
+# ---------------------------------------------------------------------------
+def _contract_issues(versions: list, cal_h: dict) -> list[str]:
+    """Anomalies d'un employé : période sans calendrier, ou taux probablement changé
+    sans mise à jour du calendrier (salaire qui varie ≥15% alors que le calendrier reste
+    identique). Détecte le cas « janvier à 50% mais calendrier resté à 100% »."""
+    issues: list[str] = []
+    vs = sorted([v for v in versions if v.get("date_start")], key=lambda z: str(z["date_start"]))
+    for v in vs:
+        if not v.get("resource_calendar_id"):
+            issues.append(f"Période du {str(v['date_start'])[:10]} sans calendrier de travail")
+    for i in range(1, len(vs)):
+        a, b = vs[i - 1], vs[i]
+        ca, cb = a.get("resource_calendar_id"), b.get("resource_calendar_id")
+        if not ca or not cb:
+            continue
+        ha, hb = cal_h.get(ca[0], 0.0), cal_h.get(cb[0], 0.0)
+        wa, wb = a.get("wage") or 0.0, b.get("wage") or 0.0
+        if wa > 0 and wb > 0 and abs(ha - hb) < 0.1 and abs(wb - wa) / wa >= 0.15:
+            pct = round(ha / 42 * 100) if ha else 0
+            issues.append(
+                f"Salaire {wa:.0f}→{wb:.0f} (×{wb / wa:.2f}) au {str(b['date_start'])[:10]} "
+                f"mais calendrier inchangé ({pct}%) — taux d'activité à corriger")
+    return issues
+
+
+def _calendar_hours_map(ro, versions: list) -> dict:
+    ids = list({v["resource_calendar_id"][0] for v in versions if v.get("resource_calendar_id")})
+    if not ids:
+        return {}
+    return {c["id"]: (c.get("hours_per_week") or 0.0)
+            for c in ro.execute_kw("resource.calendar", "read", [ids], {"fields": ["hours_per_week"]})}
+
+
+def employee_contract_issues(hr_employee_id: int) -> list[str]:
+    """Anomalies de contrat d'un employé (pour le ⚠️ de la fiche CCNT)."""
+    ro = get_client()
+    vers = ro.execute_kw("hr.version", "search_read", [[["employee_id", "=", hr_employee_id]]],
+                         {"fields": ["date_start", "date_end", "resource_calendar_id", "wage"]})
+    return _contract_issues(vers, _calendar_hours_map(ro, vers))
+
+
+def contract_anomalies(company_id: int) -> list[dict]:
+    """Employés de la société dont le contrat présente une anomalie (écran admin)."""
+    ro = get_client()
+    emps = ro.execute_kw("hr.employee", "search_read", [[["company_id", "=", company_id]]],
+                         {"fields": ["id", "name"]})
+    ids = [e["id"] for e in emps]
+    if not ids:
+        return []
+    names = {e["id"]: e["name"] for e in emps}
+    vers = ro.execute_kw("hr.version", "search_read", [[["employee_id", "in", ids]]],
+                         {"fields": ["employee_id", "date_start", "date_end", "resource_calendar_id", "wage"]})
+    cal_h = _calendar_hours_map(ro, vers)
+    from collections import defaultdict
+    by = defaultdict(list)
+    for v in vers:
+        if v.get("employee_id"):
+            by[v["employee_id"][0]].append(v)
+    out = []
+    for eid in ids:
+        iss = _contract_issues(by.get(eid, []), cal_h)
+        if iss:
+            out.append({"hr_employee_id": eid, "name": names.get(eid, "?"), "issues": iss})
+    return out
+
+
 def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
     """Données CCNT annuelles pour l'onglet Présence : heures timbrées par mois +
     calendrier des types de jour. Sources : hr.attendance (heures réelles timbrées),
@@ -710,6 +779,7 @@ def ccnt_year(hr_employee_id: int, company_id: int, year: int) -> dict:
         "worked_total": round(sum(worked_by_day.values()), 1),
         "worked_days": sum(1 for h in worked_by_day.values() if h > 0),
         "months": months, "calendar": calendar, "decompte": decompte, "arcs": arcs,
+        "contract_warning": employee_contract_issues(hr_employee_id),
     }
 
 

@@ -32,3 +32,10 @@ def reset_2fa(emp_id: int, _=Depends(require_admin)):
     db.reset_twofa(emp_id)
     db.revoke_trusted_devices(emp_id)
     return {"ok": True}
+
+
+@router.get("/contract-anomalies")
+def contract_anomalies(emp=Depends(require_admin)):
+    """Contrats incohérents (taux/calendrier) de la société — « Contrats à vérifier »."""
+    company_id = emp["company_id"] if emp["company_id"] else odoo.employee_company_id(emp["hr_employee_id"])
+    return odoo.contract_anomalies(company_id)

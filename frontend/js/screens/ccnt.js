@@ -1,6 +1,7 @@
 // Section « Ma CCNT » de l'onglet Présence — HHC uniquement.
 // Heures timbrées (total + par mois) + calendrier des types de jour. Données : /attendance/ccnt.
 import { api } from "../api.js";
+import { escapeHtml } from "../util.js";
 
 const MN = ["Janv", "Févr", "Mars", "Avr", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"];
 const MI = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
@@ -62,8 +63,22 @@ function injectStyle() {
    .ccgl{font-size:.6rem;color:var(--muted);margin-top:2px}.ccgl b{color:var(--ink);font-size:.64rem}
    .ccnt-solde{display:flex;justify-content:space-between;align-items:center;background:var(--white);border:1px solid var(--line);border-radius:12px;padding:11px 14px;margin-bottom:12px;font-size:.85rem}
    .ccnt-solde .pos{color:var(--ok);font-weight:800}.ccnt-solde .neg{color:var(--danger);font-weight:800}
-   .ccnt-dec td.n small{font-weight:600}`;
+   .ccnt-dec td.n small{font-weight:600}
+   .ccnt-warn{display:flex;gap:10px;align-items:flex-start;background:#fbeae7;border:1px solid #ecc7c1;border-left:4px solid var(--danger);border-radius:10px;padding:11px 13px;margin-bottom:12px;font-size:.84rem}
+   .ccnt-warn .wi{font-size:1.1rem;line-height:1}
+   .ccnt-warn b{color:var(--navy)}
+   .ccnt-warn .sub{color:var(--muted);font-size:.78rem;margin-top:4px}`;
   document.head.appendChild(s);
+}
+
+function warnBanner(data) {
+  const w = data.contract_warning || [];
+  if (!w.length) return "";
+  return `<div class="ccnt-warn"><span class="wi">⚠️</span><div>
+    <b>Contrat à vérifier</b>
+    <div>${w.map(x => escapeHtml(x)).join("<br>")}</div>
+    <div class="sub">Tant que ce n'est pas corrigé dans Odoo, le solde d'heures peut être faux.</div>
+  </div></div>`;
 }
 
 const LEG = [["work", "Travaillé", "var(--aqua-dark)"], ["ferie", "Férié", "#e7b13a"],
@@ -145,6 +160,7 @@ export async function renderCcnt(host) {
   host.innerHTML = `
     <div class="card">
       <div class="card-head"><div class="t"><b>Ma CCNT ${data.year}</b></div></div>
+      ${warnBanner(data)}
       ${summary}
       <div class="ccnt-mbars">${bars}</div>
       <div style="font-size:.8rem;font-weight:700;color:var(--navy);margin:6px 0 8px">📆 Mon calendrier</div>

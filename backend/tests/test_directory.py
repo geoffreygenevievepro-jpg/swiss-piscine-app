@@ -60,3 +60,32 @@ def test_pdf_available(monkeypatch):
     monkeypatch.setattr(odoo, "sale_document_pdf", lambda cid, kind, doc_id: {"b64": "QUJD", "filename": "devis.pdf"})
     r = client.get("/sales-docs/facture/55/pdf")
     assert r.status_code == 200 and r.json()["available"] and r.json()["datas"] == "QUJD"
+
+
+# --- Détection d'anomalies de contrat ---
+def test_contract_issue_rate_mismatch():
+    from app import odoo
+    cal_h = {10: 42.0}  # même calendrier 100% sur 2 périodes, salaire ×2
+    vers = [
+        {"date_start": "2026-01-05", "resource_calendar_id": [10, "100%"], "wage": 2692.0},
+        {"date_start": "2026-01-19", "resource_calendar_id": [10, "100%"], "wage": 5384.0},
+    ]
+    iss = odoo._contract_issues(vers, cal_h)
+    assert len(iss) == 1 and "taux d'activité à corriger" in iss[0]
+
+
+def test_contract_issue_clean_when_calendar_follows():
+    from app import odoo
+    cal_h = {10: 21.0, 20: 42.0}  # 50% puis 100% : calendrier suit → OK
+    vers = [
+        {"date_start": "2026-01-05", "resource_calendar_id": [10, "50%"], "wage": 2692.0},
+        {"date_start": "2026-01-19", "resource_calendar_id": [20, "100%"], "wage": 5384.0},
+    ]
+    assert odoo._contract_issues(vers, cal_h) == []
+
+
+def test_contract_issue_missing_calendar():
+    from app import odoo
+    vers = [{"date_start": "2026-01-05", "resource_calendar_id": False, "wage": 3000.0}]
+    iss = odoo._contract_issues(vers, {})
+    assert len(iss) == 1 and "sans calendrier" in iss[0]
