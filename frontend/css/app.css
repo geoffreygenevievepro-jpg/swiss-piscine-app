@@ -413,3 +413,14 @@ body.screen-login { background: linear-gradient(160deg, var(--navy), var(--aqua-
   .tabbar button.active::before { content: ""; position: absolute; left: -12px; top: 9px; bottom: 9px; width: 3px; border-radius: 0 3px 3px 0; background: var(--aqua-dark); }
   .view { margin-left: var(--sidebar-w); max-width: 880px; padding: 26px 34px 48px; }
 }
+
+/* --- Contacts + Devis/Factures --- */
+.ct-card { margin-bottom: 10px; }
+.ct-sub { font-size: .82rem; color: var(--muted); margin-top: 2px; }
+.ct-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.ct-act { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; background: var(--aqua-soft); color: var(--aqua-dark);
+  border-radius: 9px; padding: 8px 12px; font-size: .85rem; font-weight: 600; }
+.ct-act:hover { filter: brightness(.96); }
+.fx-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; cursor: pointer; }
+.fx-row:hover { border-color: var(--aqua); }
+.fx-pdf { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: .74rem; font-weight: 600; color: var(--aqua-dark); }

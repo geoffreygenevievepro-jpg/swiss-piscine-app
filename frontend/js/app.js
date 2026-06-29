@@ -18,8 +18,10 @@ import { notesfrais } from "./screens/notesfrais.js";
 import { documents } from "./screens/documents.js";
 import { moi } from "./screens/moi.js";
 import { admin } from "./screens/admin.js";
+import { contacts } from "./screens/contacts.js";
+import { factures } from "./screens/factures.js";
 
-const SCREENS = [accueil, pointer, terrain, planning, conges, notesfrais, documents, moi, admin];
+const SCREENS = [accueil, pointer, terrain, planning, conges, notesfrais, documents, contacts, factures, moi, admin];
 
 // Écrans contrôlables (activables/désactivables par société/employé depuis vue.heiwa).
 // Accueil/Pointer/Moi sont toujours visibles ; Admin reste réservé au rôle admin.
@@ -32,8 +34,9 @@ function navScreens() {
   const eff = me.effective_tabs;           // array | undefined (vieux cache)
   return SCREENS.filter(s => {
     if (s.id === "admin") return role === "admin";
+    if (s.id === "factures") return ["office", "manager", "admin"].includes(role);  // données financières
     if (CONTROLLABLE_TABS.includes(s.id)) return !eff || eff.includes(s.id);  // fail-open si absent
-    return true;                            // accueil/pointer/moi/… toujours visibles
+    return true;                            // accueil/pointer/contacts/moi/… toujours visibles
   });
 }
 const root = document.getElementById("app");

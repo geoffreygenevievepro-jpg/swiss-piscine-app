@@ -1251,6 +1251,151 @@ def search_partners(query: str, company_id: int | None = None, limit: int = 15) 
     )
 
 
+# ---------------------------------------------------------------------------
+# Annuaire contacts + documents commerciaux (devis/factures) — lecture seule
+# ---------------------------------------------------------------------------
+_SO_STATE = {"draft": "Devis", "sent": "Devis envoyé", "sale": "Confirmé", "done": "Terminé", "cancel": "Annulé"}
+_MOVE_STATE = {"draft": "Brouillon", "posted": "Validée", "cancel": "Annulée"}
+
+
+def list_contacts(company_id: int, query: str | None = None, limit: int = 400) -> list[dict]:
+    """Annuaire : clients RÉELS de la société = partenaires figurant sur ses devis et
+    factures (vrais contacts d'affaires, pas l'annuaire partagé global). Recherche
+    optionnelle nom/ville/email/téléphone. Lecture seule."""
+    ro = get_client()
+    pids: set = set()
+    for model, extra in (("sale.order", []),
+                         ("account.move", [["move_type", "in", ["out_invoice", "out_refund"]]])):
+        try:
+            for r in ro.execute_kw(model, "search_read",
+                                   [[["company_id", "=", company_id]] + extra],
+                                   {"fields": ["partner_id"], "limit": 1500, "order": "id desc"}):
+                if r.get("partner_id"):
+                    pids.add(r["partner_id"][0])
+        except Exception:
+            pass
+    if not pids:
+        return []
+    domain = [["id", "in", list(pids)]]
+    if query and query.strip():
+        q = query.strip()
+        domain = domain + ["|", "|", "|",
+                           ["name", "ilike", q], ["city", "ilike", q],
+                           ["email", "ilike", q], ["phone", "ilike", q]]
+    rows = ro.execute_kw("res.partner", "search_read", [domain],
+                         {"fields": ["name", "phone", "email", "street", "zip",
+                                     "city", "function", "parent_id", "is_company"],
+                          "limit": limit, "order": "name"})
+    out = []
+    for r in rows:
+        out.append({
+            "id": r["id"], "name": r.get("name") or "",
+            "phone": r.get("phone") or "",
+            "email": r.get("email") or "",
+            "street": r.get("street") or "", "zip": r.get("zip") or "", "city": r.get("city") or "",
+            "function": r.get("function") or "",
+            "company": r["parent_id"][1] if r.get("parent_id") else "",
+            "is_company": bool(r.get("is_company")),
+        })
+    return out
+
+
+def list_sale_documents(company_id: int, kind: str, query: str | None = None, limit: int = 100) -> list[dict]:
+    """Devis (sale.order) ou factures clients (account.move out_invoice) de la société.
+    Marque `has_pdf` si un PDF est déjà stocké en pièce jointe. Lecture seule."""
+    ro = get_client()
+    if kind == "facture":
+        model, date_f, order = "account.move", "invoice_date", "invoice_date desc, id desc"
+        base = [["company_id", "=", company_id], ["move_type", "=", "out_invoice"], ["state", "=", "posted"]]
+        fields = ["name", "partner_id", "amount_total", "invoice_date", "state"]
+    else:
+        model, date_f, order = "sale.order", "date_order", "date_order desc, id desc"
+        base = [["company_id", "=", company_id]]
+        fields = ["name", "partner_id", "amount_total", "date_order", "state"]
+    domain = base + (["|", ["name", "ilike", query.strip()], ["partner_id", "ilike", query.strip()]]
+                     if query and query.strip() else [])
+    rows = ro.execute_kw(model, "search_read", [domain], {"fields": fields, "limit": limit, "order": order})
+    ids = [r["id"] for r in rows]
+    pdf_ids = set()
+    if ids:
+        atts = ro.execute_kw("ir.attachment", "search_read",
+                             [[["res_model", "=", model], ["res_id", "in", ids], ["mimetype", "=", "application/pdf"]]],
+                             {"fields": ["res_id"]})
+        pdf_ids = {a["res_id"] for a in atts}
+    labels = _MOVE_STATE if kind == "facture" else _SO_STATE
+    out = []
+    for r in rows:
+        d = r.get(date_f) or ""
+        out.append({"id": r["id"], "name": r.get("name") or "—",
+                    "partner": r["partner_id"][1] if r.get("partner_id") else "",
+                    "amount": r.get("amount_total") or 0.0,
+                    "date": str(d)[:10] if d else "",
+                    "state": labels.get(r.get("state"), r.get("state") or ""),
+                    "has_pdf": r["id"] in pdf_ids})
+    return out
+
+
+def sale_document_detail(company_id: int, kind: str, doc_id: int) -> dict | None:
+    """Fiche lecture seule d'un devis/facture (en-tête + lignes + totaux). None si non trouvé
+    pour cette société (garde-fou multi-société)."""
+    ro = get_client()
+    if kind == "facture":
+        recs = ro.execute_kw("account.move", "search_read",
+                             [[["id", "=", doc_id], ["company_id", "=", company_id], ["move_type", "=", "out_invoice"]]],
+                             {"fields": ["name", "partner_id", "invoice_date", "invoice_date_due",
+                                         "amount_untaxed", "amount_tax", "amount_total", "state"]})
+        if not recs:
+            return None
+        m = recs[0]
+        ll = ro.execute_kw("account.move.line", "search_read",
+                           [[["move_id", "=", doc_id], ["display_type", "=", False]]],
+                           {"fields": ["name", "quantity", "price_unit", "price_subtotal"]})
+        items = [{"name": l.get("name") or "", "qty": l.get("quantity") or 0,
+                  "price": l.get("price_unit") or 0, "subtotal": l.get("price_subtotal") or 0} for l in ll]
+        return {"kind": kind, "id": doc_id, "name": m.get("name"),
+                "partner": m["partner_id"][1] if m.get("partner_id") else "",
+                "date": str(m.get("invoice_date") or "")[:10], "due": str(m.get("invoice_date_due") or "")[:10],
+                "untaxed": m.get("amount_untaxed") or 0, "tax": m.get("amount_tax") or 0,
+                "total": m.get("amount_total") or 0, "state": _MOVE_STATE.get(m.get("state"), m.get("state")),
+                "items": items}
+    recs = ro.execute_kw("sale.order", "search_read",
+                         [[["id", "=", doc_id], ["company_id", "=", company_id]]],
+                         {"fields": ["name", "partner_id", "date_order", "validity_date",
+                                     "amount_untaxed", "amount_tax", "amount_total", "state"]})
+    if not recs:
+        return None
+    m = recs[0]
+    ll = ro.execute_kw("sale.order.line", "search_read",
+                       [[["order_id", "=", doc_id], ["display_type", "=", False]]],
+                       {"fields": ["name", "product_uom_qty", "price_unit", "price_subtotal"]})
+    items = [{"name": l.get("name") or "", "qty": l.get("product_uom_qty") or 0,
+              "price": l.get("price_unit") or 0, "subtotal": l.get("price_subtotal") or 0} for l in ll]
+    return {"kind": kind, "id": doc_id, "name": m.get("name"),
+            "partner": m["partner_id"][1] if m.get("partner_id") else "",
+            "date": str(m.get("date_order") or "")[:10], "due": str(m.get("validity_date") or "")[:10],
+            "untaxed": m.get("amount_untaxed") or 0, "tax": m.get("amount_tax") or 0,
+            "total": m.get("amount_total") or 0, "state": _SO_STATE.get(m.get("state"), m.get("state")),
+            "items": items}
+
+
+def sale_document_pdf(company_id: int, kind: str, doc_id: int) -> dict | None:
+    """PDF stocké en pièce jointe d'un devis/facture (base64), si présent et appartenant à
+    la société. None sinon (le frontend bascule alors sur la fiche)."""
+    ro = get_client()
+    model = "account.move" if kind == "facture" else "sale.order"
+    dom = [["id", "=", doc_id], ["company_id", "=", company_id]]
+    if kind == "facture":
+        dom.append(["move_type", "=", "out_invoice"])
+    if not ro.execute_kw(model, "search_count", [dom]):
+        return None
+    atts = ro.execute_kw("ir.attachment", "search_read",
+                         [[["res_model", "=", model], ["res_id", "=", doc_id], ["mimetype", "=", "application/pdf"]]],
+                         {"fields": ["name", "datas"], "order": "id desc", "limit": 1})
+    if not atts or not atts[0].get("datas"):
+        return None
+    return {"filename": atts[0].get("name") or f"{kind}.pdf", "b64": atts[0]["datas"]}
+
+
 def create_partner(name: str, zip_code: str | None = None, city: str | None = None,
                    street: str | None = None, phone: str | None = None,
                    email: str | None = None) -> int:
