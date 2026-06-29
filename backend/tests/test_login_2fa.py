@@ -43,3 +43,14 @@ def test_login_twofa_required(tmp_path, monkeypatch):
     assert body.get("twofa_required") is True
     assert "pending_token" in body
     assert "access_token" not in body
+
+
+def test_login_company_exempt_skips_2fa(tmp_path, monkeypatch):
+    """Société exemptée (provisoire) → login direct sans 2FA, même 2FA activé."""
+    _prep(tmp_path, monkeypatch)
+    from app.security import hash_pin
+    db.upsert_employee(2, "hhc", "HHC User", "tech", hash_pin("1234"), 1)  # company_id=1
+    monkeypatch.setattr(db.settings, "twofa_exempt_companies", "1")
+    r = client.post("/auth/login", json={"login": "hhc", "pin": "1234"})
+    assert r.status_code == 200 and "access_token" in r.json()
+    assert "twofa_setup_required" not in r.json()

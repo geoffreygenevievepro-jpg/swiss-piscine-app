@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     # 2FA exigée à la connexion (appareil non fiable). APP_TWOFA_REQUIRED=false pour
     # la désactiver temporairement (tests) ; true = comportement normal.
     twofa_required: bool = True
+    # Sociétés (company_id Odoo) exemptées de 2FA, CSV — provisoire. Ex: APP_TWOFA_EXEMPT_COMPANIES=1
+    twofa_exempt_companies: str = ""
+
+    def twofa_exempt_set(self) -> set[int]:
+        return {int(x) for x in self.twofa_exempt_companies.split(",") if x.strip().isdigit()}
 
     # CORS : origines autorisées pour la PWA (dev local + futur sous-domaine)
     cors_origins: list[str] = [
